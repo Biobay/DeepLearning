@@ -1,0 +1,100 @@
+biettivo
+Generare sprite 2D di Pokémon a partire da una descrizione testuale (ad esempio quella del Pokédex).
+
+L’immagine generata deve riflettere accuratamente le caratteristiche descritte nel testo (aspetto, tipo, dettagli visivi).
+
+2. Architettura del modello
+Encoder-Decoder con Attention:
+
+Encoder testuale:
+
+Basato su Transformer.
+
+Embedding layer inizializzato con vettori pre-addestrati bert-mini (256 dimensioni).
+
+Gli embedding devono essere fine-tuned durante l’addestramento per adattarsi al dominio Pokémon.
+
+Decoder immagine:
+
+Basato su una Convolutional Neural Network (CNN).
+
+Deve generare uno sprite 215x215 pixel a partire da un vettore latente (rumore + informazione dal testo).
+
+Meccanismo di Attention:
+
+Il decoder deve poter “focalizzarsi” sulle parole più rilevanti della descrizione mentre genera le varie parti dell’immagine.
+
+3. Dataset
+Usare The Pokémon Dataset (disponibile su GitHub), che contiene:
+
+Descrizioni testuali (Pokédex entries).
+
+Sprite di alta qualità (215x215 px, con trasparenza).
+
+Metadata (tipo, nome, stats) opzionali.
+
+4. Preprocessing dei dati
+Testo:
+
+Estrarre le descrizioni dal CSV.
+
+Pulire e tokenizzare usando bert-mini.
+
+Mappare ogni token al suo indice.
+
+Applicare padding per uniformare la lunghezza delle sequenze.
+
+Immagini:
+
+Caricare sprite 215x215.
+
+[Opzionale] Normalizzare i pixel (es. tra -1 e 1).
+
+Gestire il canale alpha (trasparenza): tipicamente convertire in RGB su sfondo bianco.
+
+5. Training
+Addestrare il modello end-to-end sul dataset sprite-descrizione.
+
+Usare una funzione di perdita di ricostruzione pixel-wise:
+
+L1 (Mean Absolute Error) preferibile a L2 per evitare immagini troppo sfocate.
+
+Monitorare le prestazioni su validation set.
+
+Ottimizzare iperparametri e valutare il modello sul test set.
+
+6. Valutazione
+Valutare il modello sia qualitativamente (coerenza visiva con la descrizione) sia quantitativamente (metriche di ricostruzione).
+
+Discutere limiti, errori, possibili miglioramenti.
+
+7. Demo interattiva
+Obbligatorio: realizzare una demo live con Gradio.
+
+L’utente deve poter inserire una descrizione testuale e vedere lo sprite generato dal modello tramite una semplice interfaccia web.
+
+8. Deliverables
+Codice Python ben commentato.
+
+Report dettagliato che spiega:
+
+Approccio seguito.
+
+Preprocessing.
+
+Architettura.
+
+Training.
+
+Risultati e analisi.
+
+Analisi critica delle prestazioni e delle sfide.
+
+Presentazione per l’esame orale.
+
+9. Strumenti e raccomandazioni
+Puoi (e dovresti) usare librerie deep learning come TensorFlow o PyTorch.
+
+Organizza il dataset e, se necessario, applica tecniche di data augmentation.
+
+Documenta chiaramente ogni passaggio e assicurati che il codice sia riproducibile e comprensibile.
