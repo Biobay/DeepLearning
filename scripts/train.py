@@ -16,7 +16,7 @@ from tqdm import tqdm
 import src.config as config
 from src.data.dataset import PokemonDataset, create_dataloaders
 from src.models.model import PikaPikaGen
-from src.models.loss import PerceptualLoss # <-- Aggiunta import
+from src.models.loss import PerceptualLoss, CombinedLoss
 
 def train(cfg):
     """Funzione principale per l'addestramento del modello."""
@@ -45,13 +45,16 @@ def train(cfg):
     # Ottimizzatore e Loss
     optimizer = optim.Adam(model.parameters(), lr=cfg.LEARNING_RATE, weight_decay=cfg.WEIGHT_DECAY)
     
-    # Selezione della funzione di loss in base alla configurazione
-    if cfg.LOSS_FUNCTION == 'Perceptual':
-        criterion = PerceptualLoss(device=device)
-        print("Loss function: Perceptual Loss")
+    # Seleziona la funzione di loss in base alla configurazione
+    if cfg.LOSS_FUNCTION == 'Combined':
+        criterion = CombinedLoss(l1_weight=cfg.L1_LOSS_WEIGHT, device=device).to(device)
+        print(f"Utilizzo della Combined Loss con peso L1: {cfg.L1_LOSS_WEIGHT}")
+    elif cfg.LOSS_FUNCTION == 'Perceptual':
+        criterion = PerceptualLoss(device=device).to(device)
+        print("Utilizzo della Perceptual Loss.")
     else:
-        criterion = nn.MSELoss()
-        print("Loss function: MSE Loss")
+        criterion = nn.MSELoss() # Fallback a MSE
+        print("Utilizzo della MSE Loss.")
 
     # Ciclo di addestramento
     print("Inizio dell'addestramento...")

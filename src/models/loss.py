@@ -60,3 +60,23 @@ class PerceptualLoss(nn.Module):
         loss = self.criterion(generated_features, real_features)
         
         return loss
+
+class CombinedLoss(nn.Module):
+    """
+    Combina Perceptual Loss e L1 Loss per bilanciare struttura e colori.
+    """
+    def __init__(self, l1_weight=1.0, device="cpu"):
+        super(CombinedLoss, self).__init__()
+        self.perceptual_loss = PerceptualLoss(device=device)
+        self.l1_loss = nn.L1Loss()
+        self.l1_weight = l1_weight
+
+    def forward(self, generated_img, real_img):
+        # Calcola le due componenti della loss
+        perceptual = self.perceptual_loss(generated_img, real_img)
+        l1 = self.l1_loss(generated_img, real_img)
+        
+        # Combina le loss con il peso specificato
+        combined_loss = perceptual + self.l1_weight * l1
+        
+        return combined_loss

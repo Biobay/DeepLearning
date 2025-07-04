@@ -24,11 +24,12 @@ OUTPUT_CHANNELS = 3 # Canali RGB
 
 # --- Parametri di Addestramento ---
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-EPOCHS = 5 # Numero di epoche per l'addestramento
+EPOCHS = 50 # Numero di epoche per l'addestramento. Aumentato per un training efficace con Perceptual Loss.
 # Ridotto per evitare tempi di addestramento troppo lunghi
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 5e-5 # Un learning rate leggermente più basso per la loss combinata
 WEIGHT_DECAY = 1e-5 # Per la regolarizzazione L2 sull'ottimizzatore
-LOSS_FUNCTION = 'Perceptual'  # Can be 'MSE' or 'Perceptual'
+LOSS_FUNCTION = 'Combined'  # Can be 'MSE', 'Perceptual', or 'Combined'
+L1_LOSS_WEIGHT = 1.0 # Peso per la componente L1 della loss combinata
 
 # --- Parametri per il Logging e i Checkpoint ---
 RESULTS_DIR = "results"
