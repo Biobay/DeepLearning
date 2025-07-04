@@ -1,25 +1,39 @@
 import torch
 import torch.nn as nn
 
-class Attention(nn.Module):
+class MultiHeadCrossAttention(nn.Module):
     """
-    Meccanismo di attenzione per pesare gli output dell'encoder.
+    Modulo di Cross-Attention basato su Multi-Head Attention di PyTorch.
+    Permette a una sequenza di query (dal decoder) di "prestare attenzione"
+    a una sequenza di key/value (dal testo codificato).
     """
-    def __init__(self, encoder_dim, decoder_dim, attention_dim):
-        super(Attention, self).__init__()
-        self.encoder_att = nn.Linear(encoder_dim, attention_dim)
-        self.decoder_att = nn.Linear(decoder_dim, attention_dim)
-        self.full_att = nn.Linear(attention_dim, 1)
-        self.relu = nn.ReLU()
-        self.softmax = nn.Softmax(dim=1)
+    def __init__(self, embed_dim, num_heads):
+        super().__init__()
+        self.attention = nn.MultiheadAttention(
+            embed_dim=embed_dim, 
+            num_heads=num_heads, 
+            batch_first=True  # Si aspetta input come (batch, seq, feature)
+        )
 
-    def forward(self, encoder_out, decoder_hidden):
-        att1 = self.encoder_att(encoder_out)
-        att2 = self.decoder_att(decoder_hidden)
-        att = self.full_att(self.relu(att1 + att2.unsqueeze(1))).squeeze(2)
-        alpha = self.softmax(att)
-        attention_weighted_encoding = (encoder_out * alpha.unsqueeze(2)).sum(dim=1)
-        return attention_weighted_encoding, alpha
+    def forward(self, query, key_value):
+        """
+        Args:
+            query (torch.Tensor): Lo stato del decoder. Dim: (batch_size, 1, embed_dim)
+            key_value (torch.Tensor): L'output dell'encoder di testo. Dim: (batch_size, seq_len, embed_dim)
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]: L'output dell'attenzione e i pesi.
+        """
+        # Per la cross-attention, la query, la chiave e il valore sono diversi.
+        # Query: stato del decoder
+        # Key & Value: output dell'encoder di testo
+        attn_output, attn_weights = self.attention(
+            query=query, 
+            key=key_value, 
+            value=key_value, 
+            need_weights=True
+        )
+        return attn_output, attn_weights
 
 class ImageDecoder(nn.Module):
     """
@@ -101,12 +115,12 @@ class DecoderWithAttention(nn.Module):
     per creare un vettore di contesto focalizzato, e poi usa un ImageDecoder
     per generare un'immagine da quel contesto.
     """
-    def __init__(self, encoder_dim, decoder_dim, attention_dim, context_dim, output_channels=3, ngf=64):
+    def __init__(self, encoder_dim, decoder_dim, num_attention_heads, context_dim, output_channels=3, ngf=64):
         """
         Args:
             encoder_dim (int): Dimensione degli output dell'encoder di testo.
             decoder_dim (int): Dimensione dello stato nascosto del decoder (LSTM).
-            attention_dim (int): Dimensione interna del meccanismo di attenzione.
+            num_attention_heads (int): Numero di teste per la Multi-Head Attention.
             context_dim (int): Dimensione del vettore di contesto atteso dall'ImageDecoder.
             output_channels (int): Canali dell'immagine di output (es. 3 per RGB).
             ngf (int): Feature map size per il generatore.
@@ -115,16 +129,20 @@ class DecoderWithAttention(nn.Module):
         self.encoder_dim = encoder_dim
         self.decoder_dim = decoder_dim
 
-        # Meccanismo di Attenzione
-        self.attention = Attention(encoder_dim, decoder_dim, attention_dim)
+        # --- MODIFICA CHIAVE: Sostituzione dell'Attenzione ---
+        # Meccanismo di Multi-Head Cross-Attention
+        self.attention = MultiHeadCrossAttention(embed_dim=encoder_dim, num_heads=num_attention_heads)
 
-        # LSTM per generare lo stato nascosto per l'attenzione
-        # L'input all'LSTM sarà l'output medio dell'encoder
+        # LSTM per generare lo stato nascosto (query) per l'attenzione
         self.decode_step = nn.LSTMCell(encoder_dim, decoder_dim, bias=True)
 
         # Layer per inizializzare lo stato nascosto (h) e di cella (c) dell'LSTM
         self.init_h = nn.Linear(encoder_dim, decoder_dim)
         self.init_c = nn.Linear(encoder_dim, decoder_dim)
+        
+        # Layer per proiettare l'output dell'attenzione alla dimensione del contesto se necessario
+        # In questo caso, l'output dell'attenzione ha già la dimensione corretta (encoder_dim == context_dim)
+        # self.project_context = nn.Linear(encoder_dim, context_dim)
 
         # Generatore di immagini
         self.image_decoder = ImageDecoder(context_dim, output_channels, ngf)
@@ -145,30 +163,28 @@ class DecoderWithAttention(nn.Module):
 
         Args:
             encoder_out (torch.Tensor): Output dell'encoder di testo.
-                                       Dim: (batch_size, num_pixels, encoder_dim)
+                                       Dim: (batch_size, seq_len, encoder_dim)
 
         Returns:
             torch.Tensor: Immagine generata. Dim: (batch_size, C, H, W)
-            torch.Tensor: Pesi di attenzione (alpha). Dim: (batch_size, num_pixels)
+            torch.Tensor: Pesi di attenzione (alpha). Dim: (batch_size, 1, seq_len)
         """
-        batch_size = encoder_out.size(0)
-        encoder_dim = encoder_out.size(-1)
-
-        # Assicuriamoci che l'input abbia la forma (batch_size, seq_len, dim)
-        # num_pixels qui è la lunghezza della sequenza di parole
-        num_pixels = encoder_out.size(1)
-
         # 1. Inizializza lo stato nascosto dell'LSTM
         h, c = self.init_hidden_state(encoder_out)
 
-        # 2. Esegui un singolo passo dell'LSTM per ottenere uno stato nascosto "consapevole"
-        # del contenuto generale. Usiamo l'output medio dell'encoder come input.
+        # 2. Esegui un singolo passo dell'LSTM per ottenere la query per l'attenzione
         mean_encoder_out = encoder_out.mean(dim=1)
         h, c = self.decode_step(mean_encoder_out, (h, c))
 
-        # 3. Calcola il vettore di contesto usando l'attenzione
-        # Lo stato 'h' del decoder viene usato per interrogare gli output dell'encoder
-        context_vector, alpha = self.attention(encoder_out, h)
+        # 3. Calcola il vettore di contesto usando la Multi-Head Cross-Attention
+        # Lo stato 'h' del decoder (la nostra query) deve avere una dimensione di sequenza.
+        query = h.unsqueeze(1)  # Shape: (batch_size, 1, decoder_dim)
+        
+        # L'output dell'encoder è la nostra key e value
+        context_vector, alpha = self.attention(query=query, key_value=encoder_out)
+        
+        # L'output dell'attenzione ha shape (batch_size, 1, embed_dim), lo riduciamo
+        context_vector = context_vector.squeeze(1) # Shape: (batch_size, embed_dim)
 
         # 4. Genera l'immagine dal vettore di contesto
         generated_image = self.image_decoder(context_vector)

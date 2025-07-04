@@ -51,16 +51,24 @@ def denormalize_and_save_image(tensor, file_path):
     pil_image.save(file_path)
     print(f"Immagine salvata in: {file_path}")
 
-def plot_attention(attention_weights, tokens, image_path):
+def plot_attention(attention_weights, tokens, image, output_path):
     """
     Visualizza e salva i pesi di attenzione su un'immagine.
+    Gestisce sia l'attenzione additiva (2D) che la Multi-Head (4D).
 
     Args:
-        attention_weights (torch.Tensor): Pesi di attenzione (seq_len,).
+        attention_weights (torch.Tensor): Pesi di attenzione.
         tokens (list): Lista di token corrispondenti ai pesi.
         image (torch.Tensor): Immagine generata (C, H, W).
         output_path (str): Path dove salvare il plot.
     """
+    # --- MODIFICA CHIAVE: Gestione dei pesi da Multi-Head Attention ---
+    # I pesi da MultiHeadAttention hanno shape (batch, heads, query_len, key_len)
+    # Nel nostro caso, per il primo elemento del batch, sarà (num_heads, 1, seq_len)
+    if attention_weights.dim() == 3:
+        # Calcoliamo la media dei pesi attraverso le teste
+        attention_weights = attention_weights.mean(dim=0)
+
     # Pulisce e prepara i dati
     attention_weights = attention_weights.squeeze().cpu().detach().numpy()
     

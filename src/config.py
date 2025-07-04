@@ -17,7 +17,7 @@ FINE_TUNE_ENCODER = True # Se fare il fine-tuning dell'encoder
 
 # Decoder e Attenzione
 DECODER_DIM = 256  # Dimensione dello stato nascosto dell'LSTM nel decoder
-ATTENTION_DIM = 128 # Dimensione del meccanismo di attenzione
+ATTENTION_HEADS = 8 # Numero di teste nel meccanismo di Multi-Head Attention
 CONTEXT_DIM = ENCODER_DIM # Il contesto per il generatore di immagini è l'output dell'encoder
 NGF = 64 # Numero di feature nel generatore
 OUTPUT_CHANNELS = 3 # Canali RGB
