@@ -1,61 +1,42 @@
 import torch
 import torch.nn as nn
 from src.models.encoder import TextEncoder
-from src.models.decoder import DecoderWithAttention
+from src.models.decoder import ImageDecoder
 
 class PikaPikaGen(nn.Module):
     """
-    Modello end-to-end che combina l'encoder di testo e il decoder di immagini con attenzione.
-    Prende in input una descrizione testuale e genera un'immagine corrispondente.
+    Modello end-to-end che combina l'encoder di testo e il decoder di immagini.
     """
-    def __init__(self, encoder_model_name, encoder_dim, decoder_dim, attention_dim, context_dim, output_channels=3, ngf=64, fine_tune_encoder=True):
+    def __init__(self, config):
         """
         Args:
-            encoder_model_name (str): Nome del modello per l'encoder (es. 'prajjwal1/bert-mini').
-            encoder_dim (int): Dimensione dell'output dell'encoder.
-            decoder_dim (int): Dimensione dello stato nascosto del decoder (LSTM).
-            attention_dim (int): Dimensione interna del meccanismo di attenzione.
-            context_dim (int): Dimensione del vettore di contesto per l'ImageDecoder.
-            output_channels (int): Canali dell'immagine di output (3 per RGB).
-            ngf (int): Numero di feature nel generatore.
-            fine_tune_encoder (bool): Se fare il fine-tuning dei pesi dell'encoder.
+            config: Oggetto o dizionario con i parametri di configurazione.
         """
         super().__init__()
         
-        # 1. Encoder di Testo
         self.encoder = TextEncoder(
-            model_name=encoder_model_name,
-            fine_tune=fine_tune_encoder
+            model_name=config.ENCODER_MODEL_NAME,
+            fine_tune=config.FINE_TUNE_ENCODER
         )
         
-        # 2. Decoder di Immagini con Attenzione
-        self.decoder = DecoderWithAttention(
-            encoder_dim=encoder_dim,
-            decoder_dim=decoder_dim,
-            attention_dim=attention_dim,
-            context_dim=context_dim,
-            output_channels=output_channels,
-            ngf=ngf
+        self.decoder = ImageDecoder(
+            text_embed_dim=config.ENCODER_DIM,
+            num_heads=config.NUM_HEADS,
+            output_channels=config.OUTPUT_CHANNELS,
+            ngf=config.NGF
         )
 
     def forward(self, input_ids, attention_mask):
         """
-        Passaggio forward del modello completo.
+        Passaggio forward del modello.
 
         Args:
-            input_ids (torch.Tensor): Tensor degli ID dei token dal tokenizer.
-                                      Dim: (batch_size, seq_len)
-            attention_mask (torch.Tensor): Maschera di attenzione dal tokenizer.
-                                           Dim: (batch_size, seq_len)
+            input_ids (torch.Tensor): ID dei token di input.
+            attention_mask (torch.Tensor): Maschera di attenzione.
 
         Returns:
-            torch.Tensor: Immagine generata. Dim: (batch_size, C, H, W)
-            torch.Tensor: Pesi di attenzione. Dim: (batch_size, seq_len)
+            Tuple[torch.Tensor, torch.Tensor]: Immagine generata e pesi di attenzione.
         """
-        # Passa il testo attraverso l'encoder per ottenere gli hidden states
-        encoder_output = self.encoder(input_ids, attention_mask)
-        
-        # Passa gli hidden states al decoder per generare l'immagine
-        generated_image, attention_weights = self.decoder(encoder_output)
-        
+        text_features = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
+        generated_image, attention_weights = self.decoder(text_features)
         return generated_image, attention_weights
