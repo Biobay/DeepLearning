@@ -7,13 +7,14 @@ class TextEncoder(nn.Module):
 
     Args:
         model_name (str): Nome del modello da Hugging Face (es. 'prajjwal1/bert-mini').
-        freeze_encoder (bool): Se True, congela i pesi del modello pre-addestrato.
+        fine_tune (bool): Se True, i pesi del modello verranno aggiornati durante l'addestramento.
     """
-    def __init__(self, model_name='prajjwal1/bert-mini', freeze_encoder=True):
+    def __init__(self, model_name='prajjwal1/bert-mini', fine_tune=True):
         super().__init__()
         self.transformer = AutoModel.from_pretrained(model_name)
 
-        if freeze_encoder:
+        # Se fine_tune è False, congela i parametri del trasformer
+        if not fine_tune:
             for param in self.transformer.parameters():
                 param.requires_grad = False
 

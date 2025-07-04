@@ -108,30 +108,37 @@ class PokemonDataset(Dataset):
             'image': image_tensor
         }
 
-def create_dataloaders(csv_path, images_dir, batch_size, train_split=0.8, val_split=0.1):
-    """Crea e restituisce i DataLoader per training, validazione e test."""
-    dataset = PokemonDataset(csv_path=csv_path, images_dir=images_dir)
+def create_dataloader(csv_path, images_dir, tokenizer, batch_size, image_size, max_length, num_workers, shuffle=True):
+    """
+    Crea e restituisce un DataLoader per un dato file CSV.
 
-    # Calcola le dimensioni degli split
-    total_size = len(dataset)
-    train_size = int(train_split * total_size)
-    val_size = int(val_split * total_size)
-    test_size = total_size - train_size - val_size
+    Args:
+        csv_path (str): Percorso al file CSV.
+        images_dir (str): Directory delle immagini.
+        tokenizer: Tokenizer da utilizzare.
+        batch_size (int): Dimensione del batch.
+        image_size (int): Dimensione delle immagini.
+        max_length (int): Lunghezza massima delle sequenze.
+        num_workers (int): Numero di worker per il caricamento dei dati.
+        shuffle (bool): Se mescolare i dati.
 
-    # Esegui lo split
-    train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(
-        dataset, [train_size, val_size, test_size],
-        generator=torch.Generator().manual_seed(42) # Per la riproducibilità
+    Returns:
+        DataLoader: Il DataLoader creato.
+    """
+    dataset = PokemonDataset(
+        csv_path=csv_path,
+        images_dir=images_dir,
+        tokenizer_name=tokenizer.name_or_path,
+        image_size=image_size,
+        max_length=max_length
     )
 
-    # Crea i DataLoader
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=num_workers,
+        pin_memory=True
+    )
 
-    print(f"DataLoader creati:")
-    print(f"  - Training: {len(train_dataset)} campioni")
-    print(f"  - Validazione: {len(val_dataset)} campioni")
-    print(f"  - Test: {len(test_dataset)} campioni")
-
-    return train_loader, val_loader, test_loader, dataset.tokenizer
+    return dataloader

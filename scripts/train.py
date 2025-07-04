@@ -1,95 +1,167 @@
-
 import torch
 import torch.optim as optim
 import torch.nn as nn
 from transformers import AutoTokenizer
-import argparse
 import os
-
-# Assicurati che i percorsi dei moduli siano corretti
 import sys
+from tqdm import tqdm
+
+# Aggiunge la root del progetto al path per permettere l'import dei moduli src
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.data.dataset import PokemonDataset, create_dataloaders
-from src.models.encoder import TextEncoder
-from src.models.decoder import ImageDecoder
-from src.models.pikapikaGen import PikaPikaGen
-from src.training.trainer import Trainer
+from src.data.dataset import create_dataloader
+from src.models.model import PikaPikaGen
+import src.config as config
+from src.utils import save_image_batch, plot_attention
 
-def main(args):
+def main():
     """
-    Funzione principale per l'addestramento del modello PikaPikaGen.
+    Funzione principale per l'addestramento e la validazione del modello PikaPikaGen.
     """
-    # 1. Impostazioni preliminari
-    device = torch.device("cuda" if torch.cuda.is_available() and args.use_cuda else "cpu")
+    # --- 1. Setup Iniziale ---
+    device = torch.device(config.DEVICE)
     print(f"Utilizzo del dispositivo: {device}")
 
-    # 2. Tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(args.bert_model)
+    # Crea le directory per i risultati se non esistono
+    os.makedirs(config.CHECKPOINT_DIR, exist_ok=True)
+    os.makedirs(config.GENERATED_IMAGE_DIR, exist_ok=True)
 
-    # 3. Creazione dei DataLoader
-    print("Creazione dei DataLoader...")
-    train_loader, val_loader = create_dataloaders(
-        csv_file=args.csv_file,
-        img_dir=args.img_dir,
-        tokenizer=tokenizer,
-        batch_size=args.batch_size,
-        val_split=args.val_split,
-        num_workers=args.num_workers
-    )
-    print("DataLoader creati con successo.")
-
-    # 4. Inizializzazione del Modello
-    print("Inizializzazione del modello...")
-    text_encoder = TextEncoder(model_name=args.bert_model, fine_tune=args.fine_tune_encoder)
-    image_decoder = ImageDecoder(latent_dim=text_encoder.bert.config.hidden_size, output_size=args.image_size)
+    # --- 2. Tokenizer e Dataloaders ---
+    tokenizer = AutoTokenizer.from_pretrained(config.ENCODER_MODEL_NAME)
     
-    model = PikaPikaGen(text_encoder, image_decoder).to(device)
+    train_csv_path = os.path.join(config.SPLITS_DIR, "train.csv")
+    val_csv_path = os.path.join(config.SPLITS_DIR, "val.csv")
+
+    print("Creazione dei DataLoader per training e validazione...")
+    train_loader = create_dataloader(
+        csv_path=train_csv_path,
+        images_dir=config.IMAGE_DIR,
+        tokenizer=tokenizer,
+        batch_size=config.BATCH_SIZE,
+        image_size=config.IMAGE_SIZE,
+        max_length=128, # Questo potrebbe essere aggiunto a config
+        num_workers=config.NUM_WORKERS,
+        shuffle=True
+    )
+    
+    val_loader = create_dataloader(
+        csv_path=val_csv_path,
+        images_dir=config.IMAGE_DIR,
+        tokenizer=tokenizer,
+        batch_size=config.BATCH_SIZE,
+        image_size=config.IMAGE_SIZE,
+        max_length=128, # Questo potrebbe essere aggiunto a config
+        num_workers=config.NUM_WORKERS,
+        shuffle=False
+    )
+    print("DataLoader creati.")
+
+    # --- 3. Modello, Loss e Ottimizzatore ---
+    print("Inizializzazione del modello...")
+    model = PikaPikaGen(
+        encoder_model_name=config.ENCODER_MODEL_NAME,
+        encoder_dim=config.ENCODER_DIM,
+        decoder_dim=config.DECODER_DIM,
+        attention_dim=config.ATTENTION_DIM,
+        context_dim=config.CONTEXT_DIM,
+        output_channels=config.OUTPUT_CHANNELS,
+        ngf=config.NGF,
+        fine_tune_encoder=config.FINE_TUNE_ENCODER
+    ).to(device)
     print("Modello inizializzato.")
 
-    # 5. Ottimizzatore e Funzione di Loss
-    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
-    criterion = nn.L1Loss() # Mean Absolute Error (L1 Loss)
+    criterion = nn.L1Loss()
+    optimizer = optim.AdamW(model.parameters(), lr=config.LEARNING_RATE, weight_decay=config.WEIGHT_DECAY)
 
-    # 6. Trainer
-    trainer = Trainer(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        optimizer=optimizer,
-        criterion=criterion,
-        device=device,
-        epochs=args.epochs,
-        checkpoint_dir=args.checkpoint_dir
-    )
-
-    # 7. Avvio dell'addestramento
+    # --- 4. Ciclo di Addestramento e Validazione ---
     print("Avvio dell'addestramento...")
-    trainer.train()
+    for epoch in range(config.EPOCHS):
+        print(f"--- Epoca {epoch+1}/{config.EPOCHS} ---")
+        
+        # --- Fase di Addestramento ---
+        model.train()
+        train_loss = 0.0
+        train_progress_bar = tqdm(train_loader, desc=f"Training Epoch {epoch+1}")
+
+        for i, batch in enumerate(train_progress_bar):
+            real_images = batch['image'].to(device)
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+
+            optimizer.zero_grad()
+
+            generated_images, _ = model(input_ids, attention_mask)
+            loss = criterion(generated_images, real_images)
+            
+            loss.backward()
+            optimizer.step()
+
+            train_loss += loss.item()
+            if (i + 1) % config.LOG_INTERVAL == 0:
+                train_progress_bar.set_postfix(loss=f"{loss.item():.4f}")
+
+        avg_train_loss = train_loss / len(train_loader)
+        print(f"Loss di Addestramento Media: {avg_train_loss:.4f}")
+
+        # --- Fase di Validazione ---
+        model.eval()
+        val_loss = 0.0
+        val_progress_bar = tqdm(val_loader, desc=f"Validation Epoch {epoch+1}")
+        
+        with torch.no_grad():
+            for i, batch in enumerate(val_progress_bar):
+                real_images = batch['image'].to(device)
+                input_ids = batch['input_ids'].to(device)
+                attention_mask = batch['attention_mask'].to(device)
+
+                generated_images, attention_weights = model(input_ids, attention_mask)
+                loss = criterion(generated_images, real_images)
+                
+                val_loss += loss.item()
+
+                # Salva un batch di immagini generate e il grafico dell'attenzione
+                if i == 0 and (epoch + 1) % config.SAVE_IMAGE_EPOCHS == 0:
+                    try:
+                        # Salva le immagini generate
+                        save_image_batch(
+                            tensor=generated_images.cpu(),
+                            output_dir=config.GENERATED_IMAGE_DIR,
+                            epoch=epoch + 1,
+                            batch_idx=0
+                        )
+                        
+                        # Prepara i dati per il plot dell'attenzione (solo per la prima immagine del batch)
+                        tokens = tokenizer.convert_ids_to_tokens(input_ids[0].cpu(), skip_special_tokens=True)
+                        
+                        # Pulisce i token da eventuali caratteri speciali di BERT
+                        cleaned_tokens = [t.replace('##', '') for t in tokens]
+
+                        # Plotta l'attenzione
+                        plot_attention(
+                            attention_weights[0].cpu(), 
+                            cleaned_tokens, 
+                            generated_images[0].cpu(), 
+                            output_path=os.path.join(config.GENERATED_IMAGE_DIR, f"attention_epoch_{epoch+1}.png")
+                        )
+                    except Exception as e:
+                        print(f"\n[ATTENZIONE] Impossibile salvare l'immagine o il plot dell'attenzione all'epoca {epoch+1}. Errore: {e}")
+                        # L'addestramento continua comunque
+
+        avg_val_loss = val_loss / len(val_loader)
+        print(f"Loss di Validazione Media: {avg_val_loss:.4f}")
+
+        # --- Salvataggio Checkpoint ---
+        if (epoch + 1) % config.CHECKPOINT_SAVE_EPOCHS == 0:
+            checkpoint_path = os.path.join(config.CHECKPOINT_DIR, f"pikapikagen_epoch_{epoch+1}.pth")
+            torch.save({
+                'epoch': epoch + 1,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'loss': avg_val_loss,
+            }, checkpoint_path)
+            print(f"Checkpoint salvato in: {checkpoint_path}")
+
     print("Addestramento completato.")
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Addestra il modello PikaPikaGen per generare sprite di Pokémon.')
-    
-    # Argomenti relativi ai dati
-    parser.add_argument('--csv_file', type=str, default='data/pokemon.csv', help='Percorso del file CSV con le descrizioni.')
-    parser.add_argument('--img_dir', type=str, default='small_images/', help='Directory con le immagini dei Pokémon.')
-    parser.add_argument('--image_size', type=int, default=215, help='Dimensione desiderata per le immagini (altezza e larghezza).')
-
-    # Argomenti relativi al modello
-    parser.add_argument('--bert_model', type=str, default='prajjwal1/bert-mini', help='Nome del modello BERT da usare come encoder.')
-    parser.add_argument('--fine_tune_encoder', action='store_true', help='Se impostato, il text encoder verrà fine-tuned durante l'addestramento.')
-
-    # Argomenti relativi all'addestramento
-    parser.add_argument('--epochs', type=int, default=50, help='Numero di epoche di addestramento.')
-    parser.add_argument('--batch_size', type=int, default=16, help='Dimensione del batch.')
-    parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate per l'ottimizzatore.')
-    parser.add_argument('--val_split', type=float, default=0.1, help='Frazione del dataset da usare per la validazione.')
-    parser.add_argument('--num_workers', type=int, default=0, help='Numero di worker per il DataLoader.')
-    parser.add_argument('--use_cuda', action='store_true', help='Se impostato, usa la GPU per l'addestramento (se disponibile).')
-
-    # Argomenti relativi ai checkpoint
-    parser.add_argument('--checkpoint_dir', type=str, default='results/checkpoints', help='Directory dove salvare i checkpoint del modello.')
-
-    args = parser.parse_args()
-    main(args)
+    main()
