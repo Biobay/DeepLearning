@@ -5,7 +5,7 @@ datasets
 pandas
 numpy
 pillow
-matplotlib>
+matplotlib
 seaborn
 tqdm
 tensorboard
