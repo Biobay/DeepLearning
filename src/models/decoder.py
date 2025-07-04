@@ -12,8 +12,14 @@ class ImageDecoder(nn.Module):
         super().__init__()
         # La dimensione di input è la somma di ENCODER_DIM (testo) e Z_DIM (rumore)
         text_and_noise_dim = config.ENCODER_DIM + config.Z_DIM
+        ngf = config.NGF
+        
         self.init_projection = nn.Linear(text_and_noise_dim, ngf * 8 * 4 * 4)
         self.attention = MultiHeadCrossAttention(embed_dim=config.ENCODER_DIM, num_heads=num_heads)
+        
+        # Nuovo layer per proiettare l'output dell'attention
+        self.attention_projection = nn.Linear(config.ENCODER_DIM, ngf * 8 * 4 * 4)
+
         self.main = nn.Sequential(
             nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ngf * 4),
@@ -38,13 +44,16 @@ class ImageDecoder(nn.Module):
         cond_vector = torch.cat([cls_embedding, z], dim=1) # (batch, ENCODER_DIM + Z_DIM)
         # Proiezione iniziale
         x = self.init_projection(cond_vector)
-        x = x.view(batch_size, -1, 4, 4)
+        
         # Attention: query = [CLS], key/value = encoder_hidden_states
         attn_output, attn_weights = self.attention(query=cls_embedding.unsqueeze(1), key_value=encoder_hidden_states)
         
-        # Aggiungiamo l'output dell'attenzione all'input della CNN per un condizionamento più forte
-        # (Questo richiede che le dimensioni siano compatibili)
-        # Per semplicità, per ora non lo aggiungiamo e usiamo solo la proiezione iniziale.
+        # Proiettiamo e rimodelliamo l'output dell'attention
+        projected_attn = self.attention_projection(attn_output.squeeze(1))
+        
+        # Sommiamo il contesto dell'attention all'input iniziale
+        # e rimodelliamo per la CNN
+        x = (x + projected_attn).view(batch_size, -1, 4, 4)
         
         # Passa attraverso la rete generativa
         generated_image = self.main(x)
