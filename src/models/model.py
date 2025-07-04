@@ -12,31 +12,32 @@ class PikaPikaGen(nn.Module):
         Args:
             config: Oggetto o dizionario con i parametri di configurazione.
         """
-        super().__init__()
-        
-        self.encoder = TextEncoder(
-            model_name=config.ENCODER_MODEL_NAME,
-            fine_tune=config.FINE_TUNE_ENCODER
-        )
-        
-        self.decoder = ImageDecoder(
-            text_embed_dim=config.ENCODER_DIM,
-            num_heads=config.NUM_HEADS,
-            output_channels=config.OUTPUT_CHANNELS,
-            ngf=config.NGF
-        )
+        super(PikaPikaGen, self).__init__()
+        self.config = config
+        self.encoder = TextEncoder(config)
+        # Passa il numero di teste di attenzione al decoder
+        self.decoder = ImageDecoder(config, num_heads=config.NUM_HEADS)
 
-    def forward(self, input_ids, attention_mask):
+    def forward(self, input_ids, attention_mask, z=None):
         """
         Passaggio forward del modello.
 
         Args:
             input_ids (torch.Tensor): ID dei token di input.
             attention_mask (torch.Tensor): Maschera di attenzione.
+            z (torch.Tensor, optional): Vettore di rumore latente. Defaults to None.
 
         Returns:
-            Tuple[torch.Tensor, torch.Tensor]: Immagine generata e pesi di attenzione.
+            Tuple[torch.Tensor, None]: Immagini generate e un placeholder.
         """
-        text_features = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        generated_image, attention_weights = self.decoder(text_features)
-        return generated_image, attention_weights
+        cls_embedding, all_text_features = self.encoder(input_ids, attention_mask)
+        
+        # Passa tutti gli output dell'encoder e il rumore z al decoder
+        generated_images = self.decoder(
+            cls_embedding=cls_embedding, 
+            encoder_hidden_states=all_text_features, 
+            z=z
+        )
+        
+        # La tupla è per mantenere la coerenza con l'output atteso nel ciclo di training
+        return generated_images, None

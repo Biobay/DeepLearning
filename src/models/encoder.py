@@ -7,16 +7,15 @@ class TextEncoder(nn.Module):
     Encoder di testo basato su un modello Transformer pre-addestrato.
     Estrae le feature dal testo di input.
     """
-    def __init__(self, model_name='prajjwal1/bert-mini', fine_tune=True):
+    def __init__(self, config):
         """
         Args:
-            model_name (str): Nome del modello da Hugging Face.
-            fine_tune (bool): Se fare il fine-tuning dei pesi del modello.
+            config: Oggetto di configurazione con i parametri del modello.
         """
         super().__init__()
-        self.transformer = AutoModel.from_pretrained(model_name)
+        self.transformer = AutoModel.from_pretrained(config.ENCODER_MODEL_NAME)
         
-        if not fine_tune:
+        if not config.FINE_TUNE_ENCODER:
             for param in self.transformer.parameters():
                 param.requires_grad = False
 
@@ -31,12 +30,23 @@ class TextEncoder(nn.Module):
                                            Dim: (batch_size, seq_len)
 
         Returns:
-            torch.Tensor: Hidden states dall'ultimo layer del Transformer.
-                          Dim: (batch_size, seq_len, encoder_dim)
+            Tuple[torch.Tensor, torch.Tensor]: 
+                - cls_embedding (torch.Tensor): Embedding del token [CLS] per il contesto.
+                                                Dim: (batch_size, encoder_dim)
+                - last_hidden_state (torch.Tensor): Hidden states per l'attention.
+                                                    Dim: (batch_size, seq_len, encoder_dim)
         """
         outputs = self.transformer(
             input_ids=input_ids,
             attention_mask=attention_mask
         )
-        # Restituiamo l'ultimo hidden state
-        return outputs.last_hidden_state
+        
+        last_hidden_state = outputs.last_hidden_state
+        
+        # Estraiamo l'embedding del token [CLS] (il primo token della sequenza)
+        # Questo vettore è un riassunto denso di significato dell'intera frase
+        cls_embedding = last_hidden_state[:, 0]
+
+        # Restituiamo sia il riassunto [CLS] per il contesto principale,
+        # sia gli stati completi che serviranno all'attention per i dettagli.
+        return cls_embedding, last_hidden_state

@@ -74,8 +74,11 @@ def train(cfg):
             attention_mask = batch['attention_mask'].to(device)
             real_images = batch['image'].to(device)
 
+            # Genera il vettore di rumore z
+            z = torch.randn(real_images.size(0), cfg.Z_DIM).to(device)
+
             # Forward pass
-            generated_images, _ = model(input_ids, attention_mask)
+            generated_images, _ = model(input_ids, attention_mask, z)
             
             # Calcolo della loss
             loss = criterion(generated_images, real_images)
@@ -109,7 +112,10 @@ def train(cfg):
                 input_ids = val_batch['input_ids'].to(device)
                 attention_mask = val_batch['attention_mask'].to(device)
                 
-                generated_images, _ = model(input_ids, attention_mask)
+                # Genera il vettore di rumore z anche per la validazione
+                z = torch.randn(input_ids.size(0), cfg.Z_DIM).to(device)
+                
+                generated_images, _ = model(input_ids, attention_mask, z)
                 
                 # Salva le immagini reali e generate per confronto
                 save_image(
