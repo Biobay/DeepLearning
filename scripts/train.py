@@ -16,6 +16,7 @@ from tqdm import tqdm
 import src.config as config
 from src.data.dataset import PokemonDataset, create_dataloaders
 from src.models.model import PikaPikaGen
+from src.models.loss import PerceptualLoss # <-- Aggiunta import
 
 def train(cfg):
     """Funzione principale per l'addestramento del modello."""
@@ -43,7 +44,14 @@ def train(cfg):
 
     # Ottimizzatore e Loss
     optimizer = optim.Adam(model.parameters(), lr=cfg.LEARNING_RATE, weight_decay=cfg.WEIGHT_DECAY)
-    criterion = nn.MSELoss() # Mean Squared Error per la differenza tra immagini
+    
+    # Selezione della funzione di loss in base alla configurazione
+    if cfg.LOSS_FUNCTION == 'Perceptual':
+        criterion = PerceptualLoss(device=device)
+        print("Loss function: Perceptual Loss")
+    else:
+        criterion = nn.MSELoss()
+        print("Loss function: MSE Loss")
 
     # Ciclo di addestramento
     print("Inizio dell'addestramento...")
