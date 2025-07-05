@@ -172,10 +172,20 @@ def train(cfg):
 
         # Salvataggio checkpoint
         if (epoch + 1) % cfg.CHECKPOINT_SAVE_EPOCHS == 0:
+            # Salva i checkpoint specifici dell'epoca (utile per il debug)
             torch.save(netG.state_dict(), os.path.join(cfg.CHECKPOINT_DIR, f"netG_epoch_{epoch+1}.pth"))
             torch.save(netD.state_dict(), os.path.join(cfg.CHECKPOINT_DIR, f"netD_epoch_{epoch+1}.pth"))
             torch.save(text_encoder.state_dict(), os.path.join(cfg.CHECKPOINT_DIR, f"text_encoder_epoch_{epoch+1}.pth"))
+
+            # --- CORREZIONE CHIAVE ---
+            # Salva il checkpoint del generatore con il nome fisso richiesto dalla Fase II.
+            # Questo file verrà sovrascritto ad ogni epoca di salvataggio, garantendo
+            # che la Fase II parta sempre dall'ultimo checkpoint disponibile della Fase I.
+            generator_s1_path = os.path.join(cfg.CHECKPOINT_DIR, "generator_s1.pth")
+            torch.save(netG.state_dict(), generator_s1_path)
+            
             print(f"Checkpoint salvato per l'epoca {epoch+1}")
+            print(f"-> Checkpoint per Stage-II salvato in: {generator_s1_path}")
 
     print("Addestramento completato.")
     log_file.close() # Chiudi il file di log

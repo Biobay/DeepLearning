@@ -1,12 +1,19 @@
 import torch
 import os
 
-# --- Parametri del Dataset e dei Dataloader ---
-DATA_DIR = "data"
-IMAGE_DIR = "small_images" 
+# --- Percorso di Base Assoluto ---
+# Calcola il percorso assoluto della directory principale del progetto (es. "DeepLearning")
+# __file__ è il percorso di questo file (config.py)
+# os.path.dirname(__file__) è la directory 'src'
+# os.path.join(..., '..') sale di un livello, arrivando alla root del progetto
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
+# --- Parametri del Dataset e dei Dataloader (con percorsi assoluti) ---
+DATA_DIR = os.path.join(BASE_DIR, "data")
+IMAGE_DIR = os.path.join(BASE_DIR, "small_images") 
 CSV_NAME = "pokemon.csv"
-CSV_PATH = os.path.join(DATA_DIR, CSV_NAME) # Percorso completo al file CSV
-SPLITS_DIR = "data/splits"
+CSV_PATH = os.path.join(DATA_DIR, CSV_NAME)
+SPLITS_DIR = os.path.join(DATA_DIR, "splits")
 IMAGE_SIZE = 215
 BATCH_SIZE = 16  # Ridurre se si esaurisce la memoria della GPU
 NUM_WORKERS = 0  # Numero di processi per il caricamento dei dati
@@ -35,11 +42,11 @@ LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 1e-5 # Per la regolarizzazione L2 sull'ottimizzatore
 LAMBDA_L1 = 100 # Peso per la loss di ricostruzione L1 nel generatore
 
-# --- Parametri per il Logging e i Checkpoint ---
-RESULTS_DIR = "results"
-CHECKPOINT_DIR = f"{RESULTS_DIR}/checkpoints"
-GENERATED_IMAGE_DIR = f"{RESULTS_DIR}/generated_images"
-LOG_DIR = f"{RESULTS_DIR}/logs" # Directory per i file di log
+# --- Parametri per il Logging e i Checkpoint (con percorsi assoluti) ---
+RESULTS_DIR = os.path.join(BASE_DIR, "results")
+CHECKPOINT_DIR = os.path.join(RESULTS_DIR, "checkpoints")
+GENERATED_IMAGE_DIR = os.path.join(RESULTS_DIR, "generated_images")
+LOG_DIR = os.path.join(RESULTS_DIR, "logs") # Directory per i file di log
 LOG_INTERVAL = 10 # Ogni quanti batch stampare le informazioni sulla loss
 SAVE_IMAGE_EPOCHS = 1 # Ogni quante epoche salvare un batch di immagini generate
 CHECKPOINT_SAVE_EPOCHS = 1 # Ogni quante epoche salvare un checkpoint del modello
@@ -47,10 +54,10 @@ CHECKPOINT_SAVE_EPOCHS = 1 # Ogni quante epoche salvare un checkpoint del modell
 # --- Parametri Aggiuntivi ---
 STAGE1_IMAGE_SIZE = 64  # Dimensione delle immagini per la Fase I (Stage-I GAN)
 
-# --- Parametri per la Fase II (StackGAN Stage-II) ---
+# --- Parametri per la Fase II (StackGAN Stage-II) (con percorsi assoluti) ---
 STAGE2_IMAGE_SIZE = 256 # Dimensione delle immagini ad alta risoluzione
 EPOCHS_S2 = 100 # Numero di epoche per la Fase II
 LEARNING_RATE_S2 = 1e-4 # Learning rate per gli ottimizzatori della Fase II
-CHECKPOINT_DIR_S1 = f"{RESULTS_DIR}/checkpoints" # Da dove caricare i modelli S1
-CHECKPOINT_DIR_S2 = f"{RESULTS_DIR}/checkpoints_s2"
-GENERATED_IMAGE_DIR_S2 = f"{RESULTS_DIR}/generated_images_s2"
+CHECKPOINT_DIR_S1 = CHECKPOINT_DIR # Ora punta già alla cartella corretta e assoluta
+CHECKPOINT_DIR_S2 = os.path.join(RESULTS_DIR, "checkpoints_s2")
+GENERATED_IMAGE_DIR_S2 = os.path.join(RESULTS_DIR, "generated_images_s2")

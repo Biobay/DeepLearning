@@ -10,7 +10,8 @@ from transformers import BertModel, BertTokenizer # Modificato per usare BERT
 import sys
 
 # Aggiungi la root del progetto al sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(PROJECT_ROOT)
 
 from src import config
 from src.data.dataset import PokemonDataset, collate_fn # Importa collate_fn
@@ -35,8 +36,8 @@ def train_stage2():
 
     # Generatore Fase I (caricato e non addestrato)
     gen_s1 = GeneratorS1(config).to(config.DEVICE)
-    # Assicurati che il checkpoint della fase 1 esista
-    checkpoint_s1_path = os.path.join(config.CHECKPOINT_DIR_S1, 'generator.pth')
+    # Assicurati che il checkpoint della fase 1 esista - USA UN PERCORSO ASSOLUTO
+    checkpoint_s1_path = os.path.join(PROJECT_ROOT, config.CHECKPOINT_DIR_S1, 'generator_s1.pth')
     if not os.path.exists(checkpoint_s1_path):
         print(f"Errore: Checkpoint del generatore S1 non trovato in {checkpoint_s1_path}")
         print("Assicurati di aver prima addestrato la Fase I.")
