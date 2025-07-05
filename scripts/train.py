@@ -43,7 +43,7 @@ def train(cfg):
 
     # Ottimizzatore e Loss
     optimizer = optim.Adam(model.parameters(), lr=cfg.LEARNING_RATE, weight_decay=cfg.WEIGHT_DECAY)
-    criterion = nn.MSELoss() # Mean Squared Error per la differenza tra immagini
+    criterion = nn.L1Loss() # Absolute Error per la differenza tra immagini
 
     # Ciclo di addestramento
     print("Inizio dell'addestramento...")

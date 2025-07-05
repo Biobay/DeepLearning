@@ -7,7 +7,7 @@ CSV_NAME = "pokemon.csv"
 SPLITS_DIR = "data/splits"
 IMAGE_SIZE = 215
 BATCH_SIZE = 16  # Ridurre se si esaurisce la memoria della GPU
-NUM_WORKERS = 2  # Numero di processi per il caricamento dei dati
+NUM_WORKERS = 0  # Numero di processi per il caricamento dei dati
 
 # --- Parametri del Modello ---
 # Encoder
@@ -24,7 +24,7 @@ OUTPUT_CHANNELS = 3 # Canali RGB
 
 # --- Parametri di Addestramento ---
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-EPOCHS = 5 # Numero di epoche per l'addestramento
+EPOCHS = 150 # Numero di epoche per l'addestramento
 # Ridotto per evitare tempi di addestramento troppo lunghi
 LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 1e-5 # Per la regolarizzazione L2 sull'ottimizzatore
