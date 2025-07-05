@@ -73,7 +73,7 @@ def create_dataloaders(csv_path, img_dir, splits_dir, config):
     Crea e restituisce i DataLoader per training, validazione e test.
     """
     transform = transforms.Compose([
-        transforms.Resize((config.IMAGE_SIZE, config.IMAGE_SIZE)),
+        transforms.Resize((config.STAGE1_IMAGE_SIZE, config.STAGE1_IMAGE_SIZE)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ])

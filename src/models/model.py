@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from src.models.encoder import TextEncoder
-from src.models.decoder import ImageDecoder
+from src.models.decoder import GeneratorS1
 
 class PikaPikaGen(nn.Module):
     """
@@ -19,24 +19,26 @@ class PikaPikaGen(nn.Module):
             fine_tune=config.FINE_TUNE_ENCODER
         )
         
-        self.decoder = ImageDecoder(
-            text_embed_dim=config.ENCODER_DIM,
-            num_heads=config.NUM_HEADS,
-            output_channels=config.OUTPUT_CHANNELS,
-            ngf=config.NGF
-        )
+        self.decoder = GeneratorS1(config)
 
-    def forward(self, input_ids, attention_mask):
+    def forward(self, input_ids, attention_mask, z_noise=None):
         """
         Passaggio forward del modello.
 
         Args:
             input_ids (torch.Tensor): ID dei token di input.
             attention_mask (torch.Tensor): Maschera di attenzione.
+            z_noise (torch.Tensor, opzionale): Vettore di rumore latente.
 
         Returns:
             Tuple[torch.Tensor, torch.Tensor]: Immagine generata e pesi di attenzione.
         """
-        text_features = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        generated_image, attention_weights = self.decoder(text_features)
+        # L'encoder restituisce sia [CLS] che hidden states
+        cls_embedding, hidden_states = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
+        if z_noise is None:
+            batch_size = input_ids.size(0)
+            device = input_ids.device
+            z_dim = self.decoder.z_dim
+            z_noise = torch.randn(batch_size, z_dim, device=device)
+        generated_image, attention_weights = self.decoder(cls_embedding, hidden_states, z_noise)
         return generated_image, attention_weights

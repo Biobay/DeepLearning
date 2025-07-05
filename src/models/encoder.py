@@ -31,12 +31,22 @@ class TextEncoder(nn.Module):
                                            Dim: (batch_size, seq_len)
 
         Returns:
-            torch.Tensor: Hidden states dall'ultimo layer del Transformer.
-                          Dim: (batch_size, seq_len, encoder_dim)
+            Tuple[torch.Tensor, torch.Tensor]:
+            - cls_embedding (torch.Tensor): Embedding del token [CLS] (riassunto globale).
+                                            Dim: (batch_size, encoder_dim)
+            - last_hidden_state (torch.Tensor): Hidden states dall'ultimo layer (contesto per parola).
+                                                Dim: (batch_size, seq_len, encoder_dim)
         """
         outputs = self.transformer(
             input_ids=input_ids,
             attention_mask=attention_mask
         )
-        # Restituiamo l'ultimo hidden state
-        return outputs.last_hidden_state
+        # Estraiamo l'output completo dell'ultimo layer
+        last_hidden_state = outputs.last_hidden_state
+        
+        # L'embedding [CLS] è l'output del primo token della sequenza
+        cls_embedding = last_hidden_state[:, 0]
+        
+        # Restituiamo sia l'embedding [CLS] (per il contesto globale) 
+        # che gli hidden states completi (per l'attention)
+        return cls_embedding, last_hidden_state
