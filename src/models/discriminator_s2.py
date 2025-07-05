@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from src.config import TEXT_EMBEDDING_DIM, DISCRIMINATOR_BASE_CHANNELS
 
 class DiscriminatorS2(nn.Module):
     """
@@ -10,9 +9,12 @@ class DiscriminatorS2(nn.Module):
     immagine-testo è reale o generata.
     L'architettura è progettata per catturare dettagli fini nelle immagini ad alta risoluzione.
     """
-    def __init__(self, text_embedding_dim=TEXT_EMBEDDING_DIM, d_base_channels=DISCRIMINATOR_BASE_CHANNELS):
+    def __init__(self, config):
         super(DiscriminatorS2, self).__init__()
         
+        text_embedding_dim = config.TEXT_EMBEDDING_DIM
+        d_base_channels = config.DISCRIMINATOR_BASE_CHANNELS
+
         self.image_encoder = nn.Sequential(
             # Input: 256x256x3
             nn.Conv2d(3, d_base_channels, 4, 2, 1, bias=False),
