@@ -1,5 +1,6 @@
 import os
 import sys
+import csv # Importa il modulo csv
 
 # Aggiungi la root del progetto al path di Python
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -29,6 +30,14 @@ def train(cfg):
     # Crea le directory di output
     os.makedirs(cfg.CHECKPOINT_DIR, exist_ok=True)
     os.makedirs(cfg.GENERATED_IMAGE_DIR, exist_ok=True)
+
+    # Prepara il file di log per le loss
+    log_file_path = os.path.join(cfg.LOG_DIR, "loss_log.csv")
+    os.makedirs(cfg.LOG_DIR, exist_ok=True)
+    log_file = open(log_file_path, 'w', newline='')
+    log_writer = csv.writer(log_file)
+    log_writer.writerow(['epoch', 'batch', 'loss_d', 'loss_g', 'loss_g_adv', 'loss_g_l1'])
+
 
     # Dataloader
     train_loader, val_loader, _ = create_dataloaders(
@@ -66,12 +75,12 @@ def train(cfg):
         netG.train()
         netD.train()
         
-        total_loss_g = 0
         total_loss_d = 0
+        total_loss_g = 0
         
-        progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{cfg.EPOCHS}")
+        progress_bar = tqdm(enumerate(train_loader), desc=f"Epoch {epoch+1}/{cfg.EPOCHS}", total=len(train_loader))
 
-        for batch in progress_bar:
+        for i, batch in progress_bar:
             if batch is None:
                 print("Attenzione: saltato un batch di training vuoto.")
                 continue
@@ -132,6 +141,10 @@ def train(cfg):
             total_loss_g += loss_g.item()
             progress_bar.set_postfix(Loss_D=loss_d.item(), Loss_G=loss_g.item())
 
+            # Scrivi nel file di log
+            log_writer.writerow([epoch + 1, i + 1, loss_d.item(), loss_g.item(), loss_g_adv.item(), loss_g_l1.item()])
+
+
         avg_loss_d = total_loss_d / len(train_loader)
         avg_loss_g = total_loss_g / len(train_loader)
         print(f"Epoch {epoch+1}/{cfg.EPOCHS}, Avg Loss D: {avg_loss_d:.4f}, Avg Loss G: {avg_loss_g:.4f}")
@@ -165,6 +178,7 @@ def train(cfg):
             print(f"Checkpoint salvato per l'epoca {epoch+1}")
 
     print("Addestramento completato.")
+    log_file.close() # Chiudi il file di log
 
 if __name__ == '__main__':
     train(config)
