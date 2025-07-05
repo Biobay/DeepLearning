@@ -36,6 +36,7 @@ LAMBDA_L1 = 100 # Peso per la loss di ricostruzione L1 nel generatore
 RESULTS_DIR = "results"
 CHECKPOINT_DIR = f"{RESULTS_DIR}/checkpoints"
 GENERATED_IMAGE_DIR = f"{RESULTS_DIR}/generated_images"
+LOG_DIR = f"{RESULTS_DIR}/logs" # Directory per i file di log
 LOG_INTERVAL = 10 # Ogni quanti batch stampare le informazioni sulla loss
 SAVE_IMAGE_EPOCHS = 1 # Ogni quante epoche salvare un batch di immagini generate
 CHECKPOINT_SAVE_EPOCHS = 1 # Ogni quante epoche salvare un checkpoint del modello
