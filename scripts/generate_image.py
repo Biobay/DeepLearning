@@ -3,93 +3,114 @@ import argparse
 import os
 import sys
 from torchvision.utils import save_image
-from transformers import BertTokenizer
+from torchvision import transforms
+from transformers import DistilBertTokenizer, DistilBertModel
 
 # Aggiungi la directory src al path per importare i moduli custom
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from config import (
-    ENCODER_MODEL_NAME,
+from src.config import (
     DEVICE,
-    CONTEXT_DIM,
-    DECODER_DIM,
-    ATTENTION_DIM,
-    NGF,
-    OUTPUT_CHANNELS,
-    GENERATED_IMAGE_DIR
+    Z_DIM,
+    TEXT_EMBEDDING_DIM,
+    CHECKPOINT_DIR_S1,
+    CHECKPOINT_DIR_S2,
+    GENERATED_IMAGE_DIR,
+    DECODER_BASE_CHANNELS
 )
-from models.model import PikaPikaGen
+from src.models.decoder import GeneratorS1
+from src.models.generator_s2 import GeneratorS2
 
 def find_latest_checkpoint(checkpoint_dir):
-    """Trova il checkpoint più recente in una directory."""
+    """Trova il checkpoint del generatore più recente in una directory."""
     if not os.path.exists(checkpoint_dir):
         return None
-    checkpoints = [os.path.join(checkpoint_dir, f) for f in os.listdir(checkpoint_dir) if f.endswith(".pth")]
+    # Filtra per i file del generatore
+    checkpoints = [
+        os.path.join(checkpoint_dir, f) 
+        for f in os.listdir(checkpoint_dir) 
+        if f.startswith("generator") and f.endswith(".pth")
+    ]
     if not checkpoints:
         return None
     return max(checkpoints, key=os.path.getmtime)
 
 def generate(args):
     """
-    Funzione principale per generare un'immagine da un testo.
+    Funzione principale per generare un'immagine da un testo utilizzando la pipeline StackGAN a 2 stadi.
     """
-    # --- Controllo e preparazione ---
-    checkpoint_path = args.checkpoint_path
-    if checkpoint_path is None:
-        print("Nessun checkpoint specificato, cerco il più recente in 'results/checkpoints'...")
-        checkpoint_path = find_latest_checkpoint("results/checkpoints")
-
-    if checkpoint_path is None or not os.path.exists(checkpoint_path):
-        print(f"Errore: Nessun checkpoint trovato. Assicurati di aver addestrato il modello e che i checkpoint siano in 'results/checkpoints'.")
-        return
-
-    print(f"Utilizzo del checkpoint: {checkpoint_path}")
-
+    # --- Controllo e preparazione delle directory ---
+    os.makedirs(GENERATED_IMAGE_DIR, exist_ok=True)
     output_dir = os.path.dirname(args.output_path)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         print(f"Creata directory di output: {output_dir}")
 
-    # --- Caricamento del modello ---
-    print("Caricamento del modello...")
-    model = PikaPikaGen(
-        encoder_model_name=ENCODER_MODEL_NAME,
-        context_dim=CONTEXT_DIM,
-        decoder_dim=DECODER_DIM,
-        attention_dim=ATTENTION_DIM,
-        ngf=NGF,
-        output_channels=OUTPUT_CHANNELS,
-        fine_tune_encoder=False
-    ).to(DEVICE)
+    # --- Trova i checkpoint ---
+    checkpoint_s1_path = args.checkpoint_s1 or find_latest_checkpoint(CHECKPOINT_DIR_S1)
+    checkpoint_s2_path = args.checkpoint_s2 or find_latest_checkpoint(CHECKPOINT_DIR_S2)
 
-    checkpoint = torch.load(checkpoint_path, map_location=DEVICE)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model.eval()
-    print("Modello caricato con successo.")
+    if not checkpoint_s1_path or not os.path.exists(checkpoint_s1_path):
+        print(f"Errore: Checkpoint per la Fase I non trovato in '{CHECKPOINT_DIR_S1}'.")
+        print("Assicurati di aver addestrato il modello della Fase I.")
+        return
+    if not checkpoint_s2_path or not os.path.exists(checkpoint_s2_path):
+        print(f"Errore: Checkpoint per la Fase II non trovato in '{CHECKPOINT_DIR_S2}'.")
+        print("Assicurati di aver addestrato il modello della Fase II.")
+        return
+
+    print(f"Utilizzo checkpoint Fase I: {checkpoint_s1_path}")
+    print(f"Utilizzo checkpoint Fase II: {checkpoint_s2_path}")
+
+    # --- Caricamento dei modelli ---
+    print("Caricamento dei modelli...")
+    # Generatore Fase I
+    gen_s1 = GeneratorS1(z_dim=Z_DIM, text_embedding_dim=TEXT_EMBEDDING_DIM, g_base_channels=DECODER_BASE_CHANNELS).to(DEVICE)
+    gen_s1.load_state_dict(torch.load(checkpoint_s1_path, map_location=DEVICE))
+    gen_s1.eval()
+
+    # Generatore Fase II
+    gen_s2 = GeneratorS2(text_embedding_dim=TEXT_EMBEDDING_DIM, g_base_channels=DECODER_BASE_CHANNELS).to(DEVICE)
+    gen_s2.load_state_dict(torch.load(checkpoint_s2_path, map_location=DEVICE))
+    gen_s2.eval()
+    
+    # Encoder di testo
+    tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
+    text_encoder = DistilBertModel.from_pretrained('distilbert-base-uncased').to(DEVICE)
+    text_encoder.eval()
+    print("Modelli caricati con successo.")
 
     # --- Preparazione del testo ---
     print("Preparazione del testo di input...")
-    tokenizer = BertTokenizer.from_pretrained(ENCODER_MODEL_NAME)
-    
-    inputs = tokenizer(
-        args.text,
-        return_tensors="pt",
-        padding="max_length",
-        truncation=True,
-        max_length=128
-    )
-    
-    input_ids = inputs["input_ids"].to(DEVICE)
-    attention_mask = inputs["attention_mask"].to(DEVICE)
+    with torch.no_grad():
+        inputs = tokenizer(
+            args.text,
+            return_tensors="pt",
+            padding="max_length",
+            truncation=True,
+            max_length=128
+        ).to(DEVICE)
+        text_embedding = text_encoder(**inputs).last_hidden_state[:, 0, :] # Estratto [CLS] token
 
     # --- Generazione dell'immagine ---
     print("Generazione dell'immagine in corso...")
     with torch.no_grad():
-        generated_image, _ = model(input_ids, attention_mask)
+        # Vettore di rumore
+        noise = torch.randn(1, Z_DIM, device=DEVICE)
+        
+        # Fase I: Genera immagine a bassa risoluzione
+        low_res_image = gen_s1(noise, text_embedding)
+        
+        # Fase II: Genera immagine ad alta risoluzione
+        high_res_image = gen_s2(low_res_image, text_embedding)
 
-    # --- Salvataggio dell'immagine ---
+    # --- Ridimensionamento e Salvataggio ---
+    print(f"Ridimensionamento dell'immagine a {args.size}x{args.size}...")
+    resize_transform = transforms.Resize((args.size, args.size))
+    final_image = resize_transform(high_res_image)
+
     save_image(
-        generated_image, 
+        final_image, 
         args.output_path,
         normalize=True,
         nrow=1
@@ -98,7 +119,7 @@ def generate(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Genera un'immagine di un Pokémon da una descrizione testuale.")
+    parser = argparse.ArgumentParser(description="Genera un'immagine di un Pokémon da una descrizione testuale usando StackGAN.")
     
     parser.add_argument(
         "--text",
@@ -108,10 +129,17 @@ if __name__ == "__main__":
     )
     
     parser.add_argument(
-        "--checkpoint_path",
+        "--checkpoint_s1",
         type=str,
         default=None,
-        help="Percorso del checkpoint del modello (.pth). Se non specificato, usa il più recente."
+        help=f"Percorso del checkpoint del generatore S1. Se non specificato, usa il più recente da '{CHECKPOINT_DIR_S1}'."
+    )
+
+    parser.add_argument(
+        "--checkpoint_s2",
+        type=str,
+        default=None,
+        help=f"Percorso del checkpoint del generatore S2. Se non specificato, usa il più recente da '{CHECKPOINT_DIR_S2}'."
     )
 
     parser.add_argument(
@@ -119,6 +147,13 @@ if __name__ == "__main__":
         type=str,
         default=os.path.join(GENERATED_IMAGE_DIR, "generated_pokemon.png"),
         help="Percorso dove salvare l'immagine generata."
+    )
+    
+    parser.add_argument(
+        "--size",
+        type=int,
+        default=215,
+        help="Dimensione finale dell'immagine (lato)."
     )
 
     args = parser.parse_args()

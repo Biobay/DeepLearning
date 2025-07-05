@@ -43,3 +43,11 @@ CHECKPOINT_SAVE_EPOCHS = 1 # Ogni quante epoche salvare un checkpoint del modell
 
 # --- Parametri Aggiuntivi ---
 STAGE1_IMAGE_SIZE = 64  # Dimensione delle immagini per la Fase I (Stage-I GAN)
+
+# --- Parametri per la Fase II (StackGAN Stage-II) ---
+STAGE2_IMAGE_SIZE = 256 # Dimensione delle immagini ad alta risoluzione
+EPOCHS_S2 = 100 # Numero di epoche per la Fase II
+LEARNING_RATE_S2 = 1e-4 # Learning rate per gli ottimizzatori della Fase II
+CHECKPOINT_DIR_S1 = f"{RESULTS_DIR}/checkpoints" # Da dove caricare i modelli S1
+CHECKPOINT_DIR_S2 = f"{RESULTS_DIR}/checkpoints_s2"
+GENERATED_IMAGE_DIR_S2 = f"{RESULTS_DIR}/generated_images_s2"
