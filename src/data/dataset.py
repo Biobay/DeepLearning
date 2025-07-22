@@ -68,12 +68,18 @@ class PokemonDataset(Dataset):
             "description": description
         }
 
-def create_dataloaders(csv_path, img_dir, splits_dir, config):
+def create_dataloaders(csv_path, img_dir, splits_dir, config, img_size=None):
     """
     Crea e restituisce i DataLoader per training, validazione e test.
+    
+    Args:
+        img_size: Se specificato, usa questa dimensione invece di STAGE1_IMAGE_SIZE
     """
+    # Determina la dimensione dell'immagine
+    target_size = img_size if img_size is not None else config.STAGE1_IMAGE_SIZE
+    
     transform = transforms.Compose([
-        transforms.Resize((config.STAGE1_IMAGE_SIZE, config.STAGE1_IMAGE_SIZE)),
+        transforms.Resize((target_size, target_size)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ])

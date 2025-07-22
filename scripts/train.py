@@ -51,7 +51,7 @@ def train(cfg):
     # Modelli
     text_encoder = TextEncoder(model_name=cfg.ENCODER_MODEL_NAME, fine_tune=cfg.FINE_TUNE_ENCODER).to(device)
     netG = GeneratorS1(config=cfg).to(device) # CORREZIONE: Passa l'oggetto config
-    netD = DiscriminatorS1().to(device)
+    netD = DiscriminatorS1(config=cfg).to(device) # CORREZIONE: Passa l'oggetto config
     print("Encoder, Generatore (GeneratorS1) e Discriminatore (DiscriminatorS1) creati.")
 
     # Ottimizzatori

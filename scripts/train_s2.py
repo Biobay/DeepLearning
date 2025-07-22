@@ -53,6 +53,7 @@ def train_stage2():
     opt_gen_s2 = optim.Adam(gen_s2.parameters(), lr=config.LEARNING_RATE_S2, betas=(0.5, 0.999))
     opt_disc_s2 = optim.Adam(disc_s2.parameters(), lr=config.LEARNING_RATE_S2, betas=(0.5, 0.999))
     criterion = nn.BCELoss()
+    l1_loss = nn.L1Loss() # Aggiungi la loss L1
 
     # --- Dataset ---
     transform_s2 = transforms.Compose([
