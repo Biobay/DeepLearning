@@ -119,7 +119,7 @@ class GeneratorS2(nn.Module):
             nn.ReLU(True)
         )
         
-        # Decoder principale per upsampling a 256x256
+        # Decoder principale per upsampling a 256x256 poi ridimensionamento
         self.main = nn.Sequential(
             # Input: (256 + 256) x 4 x 4 = 512 x 4 x 4
             nn.ConvTranspose2d(self.base_channels*8, self.base_channels*4, 4, 2, 1, bias=False),
@@ -146,6 +146,13 @@ class GeneratorS2(nn.Module):
             nn.Tanh()
             # 3 x 256 x 256
         )
+        
+        # Ridimensionamento adattivo per target size
+        self.target_size = config.STAGE2_IMAGE_SIZE
+        if self.target_size != 256:
+            self.resize = nn.AdaptiveAvgPool2d((self.target_size, self.target_size))
+        else:
+            self.resize = None
         
         self._initialize_weights()
     
@@ -188,10 +195,14 @@ class GeneratorS2(nn.Module):
         # 3. Concatena features immagine e testo
         combined_features = torch.cat([img_features, text_features], dim=1)  # [B, 512, 4, 4]
         
-        # 4. Genera immagine 256x256
+        # 4. Genera immagine iniziale (256x256)
         stage2_img = self.main(combined_features)
         
-        # 5. Calcola mu per Stage-II (per consistenza con l'architettura)
+        # 5. Ridimensiona alla dimensione target se necessario
+        if self.resize is not None:
+            stage2_img = self.resize(stage2_img)
+        
+        # 6. Calcola mu per Stage-II (per consistenza con l'architettura)
         mu = stage1_mu  # Riusa i parametri del Stage-I
         
         return stage2_img, mu

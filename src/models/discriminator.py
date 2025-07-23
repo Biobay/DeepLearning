@@ -108,33 +108,36 @@ class DiscriminatorS2(nn.Module):
         self.d_base_channels = config.DISCRIMINATOR_BASE_CHANNELS
         self.text_embed_dim = config.TEXT_EMBEDDING_DIM
         
-        # Rete convoluzionale per le immagini 256x256
+        # Rete convoluzionale per le immagini (dimensione flessibile)
         self.conv_block = nn.Sequential(
-            # Input: 3 x 256 x 256
+            # Input: 3 x H x W (dove H, W possono essere 256 o 215)
             nn.Conv2d(3, self.d_base_channels, 4, 2, 1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
-            # 64 x 128 x 128
+            # 64 x H/2 x W/2
             nn.Conv2d(self.d_base_channels, self.d_base_channels * 2, 4, 2, 1, bias=False),
             nn.BatchNorm2d(self.d_base_channels * 2),
             nn.LeakyReLU(0.2, inplace=True),
-            # 128 x 64 x 64
+            # 128 x H/4 x W/4
             nn.Conv2d(self.d_base_channels * 2, self.d_base_channels * 4, 4, 2, 1, bias=False),
             nn.BatchNorm2d(self.d_base_channels * 4),
             nn.LeakyReLU(0.2, inplace=True),
-            # 256 x 32 x 32
+            # 256 x H/8 x W/8
             nn.Conv2d(self.d_base_channels * 4, self.d_base_channels * 8, 4, 2, 1, bias=False),
             nn.BatchNorm2d(self.d_base_channels * 8),
             nn.LeakyReLU(0.2, inplace=True),
-            # 512 x 16 x 16
+            # 512 x H/16 x W/16
             nn.Conv2d(self.d_base_channels * 8, self.d_base_channels * 16, 4, 2, 1, bias=False),
             nn.BatchNorm2d(self.d_base_channels * 16),
             nn.LeakyReLU(0.2, inplace=True),
-            # 1024 x 8 x 8
+            # 1024 x H/32 x W/32
             nn.Conv2d(self.d_base_channels * 16, self.d_base_channels * 32, 4, 2, 1, bias=False),
             nn.BatchNorm2d(self.d_base_channels * 32),
             nn.LeakyReLU(0.2, inplace=True),
-            # 2048 x 4 x 4
+            # 2048 x H/64 x W/64
         )
+        
+        # Pooling adattivo per normalizzare a 4x4
+        self.adaptive_conv_pool = nn.AdaptiveAvgPool2d((4, 4))
         
         # Proiezione per l'embedding del testo
         self.text_projection = nn.Sequential(
@@ -163,29 +166,32 @@ class DiscriminatorS2(nn.Module):
         Forward pass del DiscriminatorS2.
         
         Args:
-            image: Immagine 256x256 [B, 3, 256, 256]
+            image: Immagine HxW [B, 3, H, W] (può essere 256x256 o 215x215)
             text_embedding: Text embedding [B, text_dim]
             
         Returns:
             output: Logit di discriminazione [B]
         """
         # 1. Estrai feature dall'immagine
-        image_features = self.conv_block(image)  # [B, 2048, 4, 4]
+        image_features = self.conv_block(image)  # [B, 2048, H', W']
         
-        # 2. Proietta l'embedding del testo
+        # 2. Normalizza le feature dell'immagine a 4x4 usando pooling adattivo
+        image_features = self.adaptive_conv_pool(image_features)  # [B, 2048, 4, 4]
+        
+        # 3. Proietta l'embedding del testo
         text_features = self.text_projection(text_embedding)  # [B, 512]
         
-        # 3. Prepara le feature del testo per la concatenazione
+        # 4. Prepara le feature del testo per la concatenazione
         h, w = image_features.shape[2], image_features.shape[3]  # 4, 4
         text_features = text_features.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, h, w)  # [B, 512, 4, 4]
         
-        # 4. Concatena le feature
+        # 5. Concatena le feature
         combined_features = torch.cat([image_features, text_features], dim=1)  # [B, 2560, 4, 4]
         
-        # 5. Blocco finale
+        # 6. Blocco finale
         x = self.final_block(combined_features)  # [B, 512, 1, 1]
         
-        # 6. Appiattisci e classifica
+        # 7. Appiattisci e classifica
         x = x.view(x.size(0), -1)  # [B, 512]
         output = self.final_classifier(x)  # [B, 1]
         

@@ -18,10 +18,11 @@ IMAGE_SIZE = 215
 BATCH_SIZE = 16  # Ridurre se si esaurisce la memoria della GPU
 NUM_WORKERS = 0  # Numero di processi per il caricamento dei dati
 MAX_SEQ_LEN = 128 # Lunghezza massima delle sequenze di testo
+MAX_TEXT_LENGTH = 128 # Lunghezza massima per la tokenizzazione (stesso valore di MAX_SEQ_LEN)
 
 # --- Parametri del Modello ---
 # Encoder
-ENCODER_MODEL_NAME = "prajjwal1/bert-mini" # Ripristinato bert-mini come richiesto
+ENCODER_MODEL_NAME = "prajjwal1/bert-mini" 
 FINE_TUNE_ENCODER = False # L'encoder non viene addestrato in questo setup
 
 # Dimensioni Fondamentali
@@ -55,7 +56,7 @@ CHECKPOINT_SAVE_EPOCHS = 1 # Ogni quante epoche salvare un checkpoint del modell
 STAGE1_IMAGE_SIZE = 64  # Dimensione delle immagini per la Fase I (Stage-I GAN)
 
 # --- Parametri per la Fase II (StackGAN Stage-II) (con percorsi assoluti) ---
-STAGE2_IMAGE_SIZE = 256 # Dimensione delle immagini ad alta risoluzione
+STAGE2_IMAGE_SIZE = 215 # Dimensione delle immagini ad alta risoluzione (come da requisiti del progetto)
 EPOCHS_S2 = 1 # Numero di epoche per la Fase II
 LEARNING_RATE_S2 = 1e-4 # Learning rate per gli ottimizzatori della Fase II
 LAMBDA_L1_S2 = 100 # Peso per la loss L1 dello Stage-II
