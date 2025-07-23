@@ -37,7 +37,7 @@ DISCRIMINATOR_BASE_CHANNELS = 64 # Controlla la larghezza/potenza del discrimina
 
 # --- Parametri di Addestramento ---
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-EPOCHS = 1 # Numero di epoche per l'addestramento Stage-I
+EPOCHS = 100 # Numero di epoche per l'addestramento Stage-I
 # Ridotto per evitare tempi di addestramento troppo lunghi
 LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 1e-5 # Per la regolarizzazione L2 sull'ottimizzatore
@@ -57,7 +57,7 @@ STAGE1_IMAGE_SIZE = 64  # Dimensione delle immagini per la Fase I (Stage-I GAN)
 
 # --- Parametri per la Fase II (StackGAN Stage-II) (con percorsi assoluti) ---
 STAGE2_IMAGE_SIZE = 215 # Dimensione delle immagini ad alta risoluzione (come da requisiti del progetto)
-EPOCHS_S2 = 1 # Numero di epoche per la Fase II
+EPOCHS_S2 = 100 # Numero di epoche per la Fase II
 LEARNING_RATE_S2 = 1e-4 # Learning rate per gli ottimizzatori della Fase II
 LAMBDA_L1_S2 = 100 # Peso per la loss L1 dello Stage-II
 CHECKPOINT_DIR_S1 = CHECKPOINT_DIR # Ora punta già alla cartella corretta e assoluta

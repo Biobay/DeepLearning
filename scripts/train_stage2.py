@@ -22,7 +22,7 @@ from src.models.decoder import GeneratorS1, GeneratorS2
 from src.models.discriminator import DiscriminatorS2
 
 def train_stage2(cfg):
-    """Funzione principale per l'addestramento del modello GAN Stage-II (64x64 -> 256x256)."""
+    """Funzione principale per l'addestramento del modello GAN Stage-II (64x64 -> 215x215)."""
     
     # Setup
     device = torch.device(cfg.DEVICE)
@@ -41,15 +41,15 @@ def train_stage2(cfg):
     log_writer = csv.writer(log_file)
     log_writer.writerow(['epoch', 'batch', 'loss_d', 'loss_g', 'loss_g_adv', 'loss_g_l1'])
     
-    # Dataloader - per Stage-II usiamo immagini a 256x256
+    # Dataloader - per Stage-II usiamo immagini a 215x215
     train_loader, val_loader, _ = create_dataloaders(
         csv_path=os.path.join(cfg.DATA_DIR, cfg.CSV_NAME),
         img_dir=cfg.IMAGE_DIR,
         splits_dir=cfg.SPLITS_DIR,
         config=cfg,
-        img_size=256  # Stage-II lavora con immagini 256x256
+        img_size=cfg.STAGE2_IMAGE_SIZE  # Stage-II lavora ora con immagini 215x215
     )
-    print("Dataloaders Stage-II creati con successo (256x256).")
+    print(f"Dataloaders Stage-II creati con successo ({cfg.STAGE2_IMAGE_SIZE}x{cfg.STAGE2_IMAGE_SIZE}).")
     
     # Modelli Stage-II
     text_encoder = TextEncoder(model_name=cfg.ENCODER_MODEL_NAME, fine_tune=cfg.FINE_TUNE_ENCODER).to(device)
@@ -87,7 +87,7 @@ def train_stage2(cfg):
     fake_label = 0.
     
     # Ciclo di addestramento Stage-II
-    print("Inizio dell'addestramento GAN Stage-II (64x64 -> 256x256)...")
+    print(f"Inizio dell'addestramento GAN Stage-II (64x64 -> {cfg.STAGE2_IMAGE_SIZE}x{cfg.STAGE2_IMAGE_SIZE})...")
     for epoch in range(cfg.EPOCHS_S2):
         text_encoder.train()
         netG_s2.train()
@@ -107,8 +107,8 @@ def train_stage2(cfg):
             # Prepara i dati
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
-            real_images_256 = batch['image'].to(device)  # Immagini reali 256x256
-            batch_size = real_images_256.size(0)
+            real_images_215 = batch['image'].to(device)  # Immagini reali 215x215
+            batch_size = real_images_215.size(0)
             
             # --- Fase 1: Addestramento del Discriminatore Stage-II ---
             netD_s2.zero_grad()
@@ -124,15 +124,15 @@ def train_stage2(cfg):
             
             # Loss su immagini reali 256x256
             labels_real = torch.full((batch_size,), real_label, dtype=torch.float, device=device)
-            output_real = netD_s2(real_images_256, cls_embedding.detach())
+            output_real = netD_s2(real_images_215, cls_embedding.detach())
             loss_d_real = adversarial_loss(output_real, labels_real)
             
             # Genera immagini 256x256 con Stage-II
-            fake_images_256, stage2_mu = netG_s2(stage1_images.detach(), cls_embedding.detach(), stage1_mu.detach())
+            fake_images_215, stage2_mu = netG_s2(stage1_images.detach(), cls_embedding.detach(), stage1_mu.detach())
             
             # Loss su immagini false 256x256
             labels_fake = torch.full((batch_size,), fake_label, dtype=torch.float, device=device)
-            output_fake = netD_s2(fake_images_256.detach(), cls_embedding.detach())
+            output_fake = netD_s2(fake_images_215.detach(), cls_embedding.detach())
             loss_d_fake = adversarial_loss(output_fake, labels_fake)
             
             loss_d = loss_d_real + loss_d_fake
@@ -152,14 +152,14 @@ def train_stage2(cfg):
                 stage1_images, stage1_mu = netG_s1(cls_embedding.detach(), hidden_states.detach(), noise)
             
             # Genera immagini 256x256 con Stage-II
-            fake_images_256, stage2_mu = netG_s2(stage1_images, cls_embedding, stage1_mu)
+            fake_images_215, stage2_mu = netG_s2(stage1_images, cls_embedding, stage1_mu)
             
             # L'obiettivo del generatore è che il discriminatore classifichi le sue immagini come reali
             labels_gen = torch.full((batch_size,), real_label, dtype=torch.float, device=device)
-            output_g = netD_s2(fake_images_256, cls_embedding)
-            
+            output_g = netD_s2(fake_images_215, cls_embedding)
+
             loss_g_adv = adversarial_loss(output_g, labels_gen)
-            loss_g_l1 = l1_loss(fake_images_256, real_images_256) * cfg.LAMBDA_L1_S2
+            loss_g_l1 = l1_loss(fake_images_215, real_images_215) * cfg.LAMBDA_L1_S2
             loss_g = loss_g_adv + loss_g_l1
             loss_g.backward()
             optimizerG_s2.step()
@@ -197,9 +197,9 @@ def train_stage2(cfg):
                 stage2_images, _ = netG_s2(stage1_images, cls_embedding, stage1_mu)
                 
                 # Salva immagini a tutte le risoluzioni per confronto
-                save_image(val_batch['image'], os.path.join(stage2_generated_dir, f"real_images_256_epoch_{epoch+1}.png"), normalize=True)
+                save_image(val_batch['image'], os.path.join(stage2_generated_dir, f"real_images_{cfg.STAGE2_IMAGE_SIZE}_epoch_{epoch+1}.png"), normalize=True)
                 save_image(stage1_images, os.path.join(stage2_generated_dir, f"stage1_images_64_epoch_{epoch+1}.png"), normalize=True)
-                save_image(stage2_images, os.path.join(stage2_generated_dir, f"stage2_images_256_epoch_{epoch+1}.png"), normalize=True)
+                save_image(stage2_images, os.path.join(stage2_generated_dir, f"stage2_images_{cfg.STAGE2_IMAGE_SIZE}_epoch_{epoch+1}.png"), normalize=True)
             print(f"Immagini Stage-II salvate per l'epoca {epoch+1}")
         
         # Salvataggio checkpoint Stage-II
