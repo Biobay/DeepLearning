@@ -24,7 +24,7 @@ OUTPUT_CHANNELS = 3 # Canali RGB
 
 # --- Parametri di Addestramento ---
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-EPOCHS = 100 # Numero di epoche per l'addestramento
+EPOCHS = 10 # Numero di epoche per l'addestramento
 # Ridotto per evitare tempi di addestramento troppo lunghi
 LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 1e-5 # Per la regolarizzazione L2 sull'ottimizzatore
