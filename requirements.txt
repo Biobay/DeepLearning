@@ -14,3 +14,4 @@ scikit-learn
 opencv-python
 accelerate
 ipywidgets
+scikit-image
