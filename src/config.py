@@ -28,6 +28,7 @@ EPOCHS = 100 # Numero di epoche per l'addestramento
 # Ridotto per evitare tempi di addestramento troppo lunghi
 LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 1e-5 # Per la regolarizzazione L2 sull'ottimizzatore
+DROPOUT_RATE = 0.5 # Tasso di dropout per il decoder
 
 # --- Parametri per il Logging e i Checkpoint ---
 RESULTS_DIR = "results"
