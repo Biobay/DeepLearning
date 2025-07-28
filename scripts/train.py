@@ -60,8 +60,10 @@ def train(cfg):
     # ## MODIFICA 1: INIZIALIZZAZIONE DELLO SCHEDULER ##
     # =============================================================================
     # Riduce il learning rate se la val_loss non migliora per 5 epoche
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5, factor=0.1, verbose=True)
+    # In scripts/train.py
 
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5, factor=0.1)
+    
     history = {
         'train_loss': [],
         'val_loss': [],
