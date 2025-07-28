@@ -15,3 +15,4 @@ opencv-python
 accelerate
 ipywidgets
 scikit-image
+lpips
