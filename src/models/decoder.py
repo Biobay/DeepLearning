@@ -1,3 +1,5 @@
+# In src/models/decoder.py
+
 import torch
 import torch.nn as nn
 from src.models.attention import MultiHeadCrossAttention
@@ -7,45 +9,41 @@ class ImageDecoder(nn.Module):
     Decoder basato su CNN (Generatore) per creare un'immagine.
     Utilizza la cross-attention per condizionare la generazione dell'immagine
     sull'output dell'encoder di testo.
-    ## MODIFICA: Aggiunto Dropout per regolarizzazione.
+    ## MODIFICA: Aggiunto Dropout2d per regolarizzazione spaziale.
     """
     
-    # ## MODIFICA 1: Aggiungi 'dropout_rate' ai parametri del costruttore ##
     def __init__(self, text_embed_dim, num_heads, output_channels=3, ngf=64, output_size=215, dropout_rate=0.5):
         super().__init__()
         
-        # Proiezione per il vettore condizionato
         self.init_projection = nn.Linear(text_embed_dim, ngf * 8 * 4 * 4)
-
-        # Modulo di Attention
         self.attention = MultiHeadCrossAttention(embed_dim=text_embed_dim, num_heads=num_heads)
         
-        # ## MODIFICA 2: Inserisci i layer di Dropout dopo le attivazioni ReLU ##
         # Rete generativa CNN (basata su DCGAN)
         self.main = nn.Sequential(
             # Input: (ngf * 8) x 4 x 4
             nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ngf * 4),
             nn.ReLU(True),
-            nn.Dropout(dropout_rate), ## AGGIUNTO ##
+            # ## CORREZIONE: Usare Dropout2d per input 4D (immagini/feature maps) ##
+            nn.Dropout2d(dropout_rate), 
 
             # State size. (ngf*4) x 8 x 8
             nn.ConvTranspose2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ngf * 2),
             nn.ReLU(True),
-            nn.Dropout(dropout_rate), ## AGGIUNTO ##
+            nn.Dropout2d(dropout_rate), 
 
             # State size. (ngf*2) x 16 x 16
             nn.ConvTranspose2d(ngf * 2, ngf, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ngf),
             nn.ReLU(True),
-            nn.Dropout(dropout_rate), ## AGGIUNTO ##
+            nn.Dropout2d(dropout_rate),
 
             # State size. (ngf) x 32 x 32
             nn.ConvTranspose2d(ngf, ngf, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ngf),
             nn.ReLU(True),
-            # Nota: Generalmente non si mette il dropout subito prima del layer di output
+            # Nota: Non si mette il dropout subito prima del layer di output
             
             # State size. (ngf) x 64 x 64
             nn.Upsample(size=output_size, mode='bilinear', align_corners=False),
@@ -54,12 +52,7 @@ class ImageDecoder(nn.Module):
         )
 
     def forward(self, text_features):
-        """
-        La funzione forward rimane identica. Il Dropout viene applicato
-        automaticamente durante model.train().
-        """
         batch_size = text_features.size(0)
-        
         context_vector = text_features.mean(dim=1).unsqueeze(1)
         attn_output, attn_weights = self.attention(query=context_vector, key_value=text_features)
         conditioned_vector = attn_output.squeeze(1)
