@@ -1,9 +1,9 @@
-# src/models/decoder.py (Versione CORRETTA e DEFINITIVA)
+# src/models/decoder.py
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .attention import MultiHeadCrossAttention
+from .attention import CrossAttentionBlock # Importiamo il nuovo blocco di attenzione
 
 # --- Blocchi Costitutivi della U-Net ---
 
@@ -23,16 +23,12 @@ class DownBlock(nn.Module):
         return self.block(x)
 
 class UpBlock(nn.Module):
-    """
-    Blocco di risalita CORRETTO: Upsample -> Conv -> BatchNorm -> ReLU.
-    Questo approccio è più stabile per le dimensioni rispetto a ConvTranspose.
-    """
+    """Blocco di risalita: Upsample -> Conv -> BatchNorm -> ReLU."""
     def __init__(self, in_channels, out_channels, use_dropout=False, dropout_rate=0.5):
         super().__init__()
-        # Usiamo Upsample + Conv2d invece di ConvTranspose2d per un miglior controllo
         self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
         self.conv = nn.Sequential(
-            # L'input channel è doppio per via della concatenazione
+            # L'input channel è doppio per la skip connection
             nn.Conv2d(in_channels * 2, out_channels, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(True)
@@ -42,12 +38,11 @@ class UpBlock(nn.Module):
 
     def forward(self, x, skip_connection):
         x = self.up(x)
-        # La concatenazione avviene DOPO l'upsampling
         x = torch.cat([x, skip_connection], dim=1)
         return self.conv(x)
 
 
-# --- Il Decoder U-Net ---
+# --- Il Decoder U-Net con Cross-Attention ---
 
 class UNetDecoder(nn.Module):
     def __init__(self, cfg):
@@ -55,10 +50,7 @@ class UNetDecoder(nn.Module):
         self.cfg = cfg
         channels = cfg.UNET_CHANNELS # es. (64, 128, 256, 512)
 
-        self.attention = MultiHeadCrossAttention(embed_dim=cfg.CONTEXT_DIM, num_heads=cfg.NUM_HEADS)
-        self.text_projection = nn.Linear(cfg.CONTEXT_DIM, channels[-1] * 2) # Proiettiamo per la modulazione
-
-        # Percorso di Discesa
+        # Percorso di Discesa (Encoder della U-Net)
         self.down1 = DownBlock(cfg.OUTPUT_CHANNELS, channels[0], use_batch_norm=False)
         self.down2 = DownBlock(channels[0], channels[1])
         self.down3 = DownBlock(channels[1], channels[2])
@@ -66,60 +58,73 @@ class UNetDecoder(nn.Module):
         
         # Bottleneck
         self.bottleneck = nn.Sequential(
-            nn.Conv2d(channels[3], channels[3], kernel_size=4, stride=2, padding=1), # Da 16x16 a 8x8
+            nn.Conv2d(channels[3], channels[3], kernel_size=4, stride=2, padding=1),
             nn.ReLU()
         )
         
-        # Percorso di Risalita
-        self.up1 = UpBlock(channels[3], channels[2])
-        self.up2 = UpBlock(channels[2], channels[1])
-        self.up3 = UpBlock(channels[1], channels[0])
-        self.up4 = UpBlock(channels[0], channels[0])
+        # Percorso di Risalita (Decoder della U-Net)
+        reversed_channels = list(reversed(channels))
         
+        self.up1 = UpBlock(reversed_channels[0], reversed_channels[1])
+        self.up2 = UpBlock(reversed_channels[1], reversed_channels[2])
+        self.up3 = UpBlock(reversed_channels[2], reversed_channels[3])
+        self.up4 = UpBlock(reversed_channels[3], reversed_channels[3]) # Output ha canali = channels[0]
+        
+        # --- Blocchi di Cross-Attention ---
+        # Un blocco di attenzione per ogni livello di risalita
+        self.attn1 = CrossAttentionBlock(query_dim=reversed_channels[1], context_dim=cfg.CONTEXT_DIM, num_heads=cfg.NUM_HEADS)
+        self.attn2 = CrossAttentionBlock(query_dim=reversed_channels[2], context_dim=cfg.CONTEXT_DIM, num_heads=cfg.NUM_HEADS)
+        self.attn3 = CrossAttentionBlock(query_dim=reversed_channels[3], context_dim=cfg.CONTEXT_DIM, num_heads=cfg.NUM_HEADS)
+        self.attn4 = CrossAttentionBlock(query_dim=reversed_channels[3], context_dim=cfg.CONTEXT_DIM, num_heads=cfg.NUM_HEADS)
+
         # Layer finale
-        self.final_conv = nn.Conv2d(channels[0], cfg.OUTPUT_CHANNELS, kernel_size=3, padding=1)
+        self.final_conv = nn.Conv2d(reversed_channels[3], cfg.OUTPUT_CHANNELS, kernel_size=3, padding=1)
         self.final_act = nn.Tanh()
 
     def forward(self, text_features):
-        # 1. Crea il vettore di contesto
-        context_vector = text_features.mean(dim=1).unsqueeze(1)
-        attn_output, _ = self.attention(query=context_vector, key_value=text_features)
-        conditioned_vector = attn_output.squeeze(1)
+        # text_features ha dimensioni (Batch, SeqLen, ContextDim)
 
-        # 2. Inizia con rumore
+        # 1. Inizia con rumore casuale alla dimensione interna del modello
         batch_size = text_features.size(0)
         x = torch.randn(batch_size, self.cfg.OUTPUT_CHANNELS, self.cfg.MODEL_INTERNAL_SIZE, self.cfg.MODEL_INTERNAL_SIZE, device=text_features.device)
         
-        # 3. Percorso di discesa
-        d1 = self.down1(x)   # 256 -> 128
-        d2 = self.down2(d1) # 128 -> 64
-        d3 = self.down3(d2) # 64 -> 32
-        d4 = self.down4(d3) # 32 -> 16
+        # 2. Percorso di discesa, salvando le skip connections
+        d1 = self.down1(x)   # Dim: 128x128
+        d2 = self.down2(d1)  # Dim: 64x64
+        d3 = self.down3(d2)  # Dim: 32x32
+        d4 = self.down4(d3)  # Dim: 16x16
         
-        # 4. Bottleneck
-        b = self.bottleneck(d4) # 16 -> 8
-        
-        # 5. Iniezione del Testo nel Bottleneck (Modulazione FiLM-like)
-        text_proj = self.text_projection(conditioned_vector)
-        # Dividiamo il vettore proiettato in due parti: una per la scala (gamma) e una per lo shift (beta)
-        gamma, beta = torch.chunk(text_proj, 2, dim=1)
-        gamma = gamma.unsqueeze(-1).unsqueeze(-1)
-        beta = beta.unsqueeze(-1).unsqueeze(-1)
-        # Applichiamo la modulazione
-        b = gamma * b + beta
+        # 3. Bottleneck
+        b = self.bottleneck(d4) # Dim: 8x8
 
-        # 6. Percorso di risalita
-        u1 = self.up1(b, d4)   # 8 -> 16 (concatena con d4 che è 16x16)
-        u2 = self.up2(u1, d3)  # 16 -> 32 (concatena con d3 che è 32x32)
-        u3 = self.up3(u2, d2)  # 32 -> 64 (concatena con d2 che è 64x64)
-        u4 = self.up4(u3, d1)  # 64 -> 128 (concatena con d1 che è 128x128)
+        # 4. Percorso di risalita con iniezione di testo a ogni passo
+        # Funzione helper per applicare l'attenzione
+        def apply_attention(x, attn_block, context):
+            B, C, H, W = x.shape
+            # Prepara le feature dell'immagine: (B, C, H, W) -> (B, H*W, C)
+            img_features = x.view(B, C, H * W).permute(0, 2, 1)
+            # Applica l'attenzione
+            attn_features = attn_block(img_features, context)
+            # Riporta le feature alla forma di immagine: (B, H*W, C) -> (B, C, H, W)
+            return attn_features.permute(0, 2, 1).view(B, C, H, W)
 
-        # 7. Layer finale per mappare ai canali RGB
-        # Upsampliamo fino alla dimensione finale e poi applichiamo l'ultima convoluzione
-        u4 = F.interpolate(u4, size=self.cfg.MODEL_INTERNAL_SIZE, mode='bilinear', align_corners=False)
-        x = self.final_conv(u4)
+        x = self.up1(b, d4)   # Risale a 16x16
+        x = apply_attention(x, self.attn1, text_features)
+
+        x = self.up2(x, d3)   # Risale a 32x32
+        x = apply_attention(x, self.attn2, text_features)
         
-        # 8. Output alla dimensione richiesta (215x215)
+        x = self.up3(x, d2)   # Risale a 64x64
+        x = apply_attention(x, self.attn3, text_features)
+        
+        x = self.up4(x, d1)   # Risale a 128x128
+        x = apply_attention(x, self.attn4, text_features)
+
+        # 5. Layer finale per mappare ai canali RGB e alla dimensione corretta
+        x = F.interpolate(x, size=self.cfg.MODEL_INTERNAL_SIZE, mode='bilinear', align_corners=False)
+        x = self.final_conv(x)
+        
+        # 6. Output alla dimensione richiesta dalla traccia (215x215)
         final_image = F.interpolate(
             x, 
             size=(self.cfg.IMAGE_OUTPUT_SIZE, self.cfg.IMAGE_OUTPUT_SIZE), 
@@ -127,4 +132,5 @@ class UNetDecoder(nn.Module):
             align_corners=False
         )
         
-        return self.final_act(final_image), _ # Restituisci anche i pesi di attention
+        # Ritorniamo None per i pesi di attenzione perché ora sono distribuiti su più layer
+        return self.final_act(final_image), None
