@@ -1,15 +1,13 @@
 # =============================================================================
-# PYTORCH & CUDA COMPATIBILITY (NIGHTLY BUILD)
+# PYTORCH & CUDA COMPATIBILITY (PER RTX 4090 E SIMILI)
 # =============================================================================
-# Specifica il repository NIGHTLY di PyTorch per la versione compilata con CUDA 12.1.
-# Questo risolve 2 problemi:
-# 1. Compatibilità con le GPU NVIDIA più recenti (serie RTX 40xx/50xx).
-# 2. Aggiorna PyTorch a una versione che supera il controllo di sicurezza di `lpips`.
---extra-index-url https://download.pytorch.org/whl/nightly/cu121
+# Specifica il repository di PyTorch per la versione stabile compilata con CUDA 11.8,
+# che è pienamente compatibile con l'architettura Ada Lovelace (sm_90) della RTX 4090.
+--extra-index-url https://download.pytorch.org/whl/cu118
 
-# Librerie principali di PyTorch (installerà l'ultima versione nightly disponibile)
-torch
-torchvision
+# Fissiamo le versioni a una build stabile e nota per funzionare bene.
+torch==2.1.2
+torchvision==0.16.2
 
 # =============================================================================
 # CORE LIBRARIES
@@ -43,4 +41,5 @@ ipywidgets
 gradio
 
 # Metriche di similarità percettiva
-lpips
+# Fissiamo anche la versione di lpips per evitare controlli di sicurezza troppo recenti
+lpips==0.1.4
