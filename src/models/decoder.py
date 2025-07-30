@@ -1,4 +1,4 @@
-# src/models/decoder.py
+# src/models/decoder.py (Versione CORRETTA e DEFINITIVA)
 
 import torch
 import torch.nn as nn
@@ -12,7 +12,7 @@ class DownBlock(nn.Module):
     def __init__(self, in_channels, out_channels, use_batch_norm=True):
         super().__init__()
         layers = [
-            nn.Conv2d(in_channels, out_channels, kernel_size=4, stride=2, padding=1, bias=False)
+            nn.Conv2d(in_channels, out_channels, kernel_size=4, stride=2, padding=1, bias=not use_batch_norm)
         ]
         if use_batch_norm:
             layers.append(nn.BatchNorm2d(out_channels))
@@ -23,110 +23,103 @@ class DownBlock(nn.Module):
         return self.block(x)
 
 class UpBlock(nn.Module):
-    """Blocco di risalita: ConvTranspose -> BatchNorm -> ReLU. Usa skip connections."""
+    """
+    Blocco di risalita CORRETTO: Upsample -> Conv -> BatchNorm -> ReLU.
+    Questo approccio è più stabile per le dimensioni rispetto a ConvTranspose.
+    """
     def __init__(self, in_channels, out_channels, use_dropout=False, dropout_rate=0.5):
         super().__init__()
-        layers = [
-            # L'input channel è doppio per via della concatenazione della skip connection
-            nn.ConvTranspose2d(in_channels * 2, out_channels, kernel_size=4, stride=2, padding=1, bias=False),
+        # Usiamo Upsample + Conv2d invece di ConvTranspose2d per un miglior controllo
+        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        self.conv = nn.Sequential(
+            # L'input channel è doppio per via della concatenazione
+            nn.Conv2d(in_channels * 2, out_channels, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(True)
-        ]
+        )
         if use_dropout:
-            layers.append(nn.Dropout(dropout_rate)) # Dropout standard dopo l'attivazione
-        self.block = nn.Sequential(*layers)
+            self.conv.append(nn.Dropout(dropout_rate))
 
     def forward(self, x, skip_connection):
+        x = self.up(x)
+        # La concatenazione avviene DOPO l'upsampling
         x = torch.cat([x, skip_connection], dim=1)
-        return self.block(x)
+        return self.conv(x)
 
 
 # --- Il Decoder U-Net ---
 
 class UNetDecoder(nn.Module):
-    """
-    Decoder U-Net condizionato dal testo. Lavora internamente a una dimensione
-    potenza di 2 e restituisce un'immagine alla dimensione finale richiesta.
-    """
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
         channels = cfg.UNET_CHANNELS # es. (64, 128, 256, 512)
 
-        # Meccanismo di attenzione per il condizionamento testuale
         self.attention = MultiHeadCrossAttention(embed_dim=cfg.CONTEXT_DIM, num_heads=cfg.NUM_HEADS)
+        self.text_projection = nn.Linear(cfg.CONTEXT_DIM, channels[-1] * 2) # Proiettiamo per la modulazione
 
-        # Percorso di Discesa (Encoder della U-Net)
-        # Il primo blocco non ha BatchNorm
+        # Percorso di Discesa
         self.down1 = DownBlock(cfg.OUTPUT_CHANNELS, channels[0], use_batch_norm=False)
+        self.down2 = DownBlock(channels[0], channels[1])
+        self.down3 = DownBlock(channels[1], channels[2])
+        self.down4 = DownBlock(channels[2], channels[3])
         
-        down_blocks_layers = []
-        for i in range(len(channels) - 1):
-            down_blocks_layers.append(DownBlock(channels[i], channels[i+1]))
-        self.down_blocks = nn.ModuleList(down_blocks_layers)
-        
-        # Bottleneck: il punto più profondo, dove inietteremo il testo
-        bottleneck_channels = channels[-1]
+        # Bottleneck
         self.bottleneck = nn.Sequential(
-            nn.Conv2d(bottleneck_channels, bottleneck_channels, kernel_size=4, stride=2, padding=1),
+            nn.Conv2d(channels[3], channels[3], kernel_size=4, stride=2, padding=1), # Da 16x16 a 8x8
             nn.ReLU()
         )
         
-        # Proiezione del testo per farlo corrispondere ai canali del bottleneck
-        self.text_projection = nn.Linear(cfg.CONTEXT_DIM, bottleneck_channels)
-        
-        # Percorso di Risalita (Decoder della U-Net)
-        up_blocks_layers = []
-        reversed_channels = list(reversed(channels))
-        for i in range(len(reversed_channels) - 1):
-            # Aggiungiamo dropout solo nei layer più profondi per regolarizzare
-            use_dropout = i < 3 
-            up_blocks_layers.append(
-                UpBlock(reversed_channels[i], reversed_channels[i+1], use_dropout=use_dropout, dropout_rate=cfg.DROPOUT_RATE)
-            )
-        self.up_blocks = nn.ModuleList(up_blocks_layers)
+        # Percorso di Risalita
+        self.up1 = UpBlock(channels[3], channels[2])
+        self.up2 = UpBlock(channels[2], channels[1])
+        self.up3 = UpBlock(channels[1], channels[0])
+        self.up4 = UpBlock(channels[0], channels[0])
         
         # Layer finale
-        self.final_conv = nn.ConvTranspose2d(channels[0] * 2, cfg.OUTPUT_CHANNELS, kernel_size=4, stride=2, padding=1)
+        self.final_conv = nn.Conv2d(channels[0], cfg.OUTPUT_CHANNELS, kernel_size=3, padding=1)
         self.final_act = nn.Tanh()
 
     def forward(self, text_features):
-        # 1. Crea il vettore di contesto dal testo
+        # 1. Crea il vettore di contesto
         context_vector = text_features.mean(dim=1).unsqueeze(1)
-        attn_output, attn_weights = self.attention(query=context_vector, key_value=text_features)
+        attn_output, _ = self.attention(query=context_vector, key_value=text_features)
         conditioned_vector = attn_output.squeeze(1)
 
-        # 2. Inizia con un'immagine di rumore alla dimensione interna del modello
+        # 2. Inizia con rumore
         batch_size = text_features.size(0)
         x = torch.randn(batch_size, self.cfg.OUTPUT_CHANNELS, self.cfg.MODEL_INTERNAL_SIZE, self.cfg.MODEL_INTERNAL_SIZE, device=text_features.device)
         
-        # 3. Percorso di discesa, salvando le skip connections
-        skips = []
-        x = self.down1(x)
-        skips.append(x)
-        for block in self.down_blocks:
-            x = block(x)
-            skips.append(x)
+        # 3. Percorso di discesa
+        d1 = self.down1(x)   # 256 -> 128
+        d2 = self.down2(d1) # 128 -> 64
+        d3 = self.down3(d2) # 64 -> 32
+        d4 = self.down4(d3) # 32 -> 16
         
         # 4. Bottleneck
-        x = self.bottleneck(x)
+        b = self.bottleneck(d4) # 16 -> 8
         
-        # 5. Iniezione del Testo (Modulazione)
+        # 5. Iniezione del Testo nel Bottleneck (Modulazione FiLM-like)
         text_proj = self.text_projection(conditioned_vector)
-        # Aggiunge due dimensioni (altezza, larghezza) al tensore del testo
-        text_proj = text_proj.unsqueeze(-1).unsqueeze(-1)
-        # "Modula" le feature nel bottleneck con l'informazione del testo
-        x = x * text_proj
+        # Dividiamo il vettore proiettato in due parti: una per la scala (gamma) e una per lo shift (beta)
+        gamma, beta = torch.chunk(text_proj, 2, dim=1)
+        gamma = gamma.unsqueeze(-1).unsqueeze(-1)
+        beta = beta.unsqueeze(-1).unsqueeze(-1)
+        # Applichiamo la modulazione
+        b = gamma * b + beta
 
-        # 6. Percorso di risalita, usando le skip connections
-        skips = list(reversed(skips))
-        for i, block in enumerate(self.up_blocks):
-            x = block(x, skips[i])
+        # 6. Percorso di risalita
+        u1 = self.up1(b, d4)   # 8 -> 16 (concatena con d4 che è 16x16)
+        u2 = self.up2(u1, d3)  # 16 -> 32 (concatena con d3 che è 32x32)
+        u3 = self.up3(u2, d2)  # 32 -> 64 (concatena con d2 che è 64x64)
+        u4 = self.up4(u3, d1)  # 64 -> 128 (concatena con d1 che è 128x128)
+
+        # 7. Layer finale per mappare ai canali RGB
+        # Upsampliamo fino alla dimensione finale e poi applichiamo l'ultima convoluzione
+        u4 = F.interpolate(u4, size=self.cfg.MODEL_INTERNAL_SIZE, mode='bilinear', align_corners=False)
+        x = self.final_conv(u4)
         
-        # 7. Layer finale per produrre l'immagine
-        x = self.final_conv(x)
-        
-        # 8. Output alla dimensione richiesta dalla traccia (215x215)
+        # 8. Output alla dimensione richiesta (215x215)
         final_image = F.interpolate(
             x, 
             size=(self.cfg.IMAGE_OUTPUT_SIZE, self.cfg.IMAGE_OUTPUT_SIZE), 
@@ -134,4 +127,4 @@ class UNetDecoder(nn.Module):
             align_corners=False
         )
         
-        return self.final_act(final_image), attn_weights
+        return self.final_act(final_image), _ # Restituisci anche i pesi di attention
