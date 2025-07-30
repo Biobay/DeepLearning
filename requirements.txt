@@ -16,3 +16,20 @@ accelerate
 ipywidgets
 scikit-image
 lpips
+# requirements.txt (versione aggiornata)
+
+# Specifica l'URL dell'indice per i pacchetti PyTorch
+--index-url https://download.pytorch.org/whl/cu121
+
+# Installa PyTorch e torchvision
+torch
+torchvision
+# torchaudio # Probabilmente non ti serve, puoi commentarlo
+
+# Le altre tue dipendenze
+transformers
+pandas
+tqdm
+scikit-image
+ipywidgets
+matplotlib
