@@ -32,8 +32,11 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 EPOCHS = 150 # Le GAN richiedono più epoche per convergere
 
 # Usiamo learning rate e beta1 standard per le GAN
-LEARNING_RATE_GEN = 2e-4
-LEARNING_RATE_DISC = 2e-4
+# In src/config.py
+
+LEARNING_RATE_GEN = 2e-4  # Lascia questo invariato
+LEARNING_RATE_DISC = 5e-5   # Riduci di 4 volte (o anche 1e-5, 10 volte)
+
 BETA1 = 0.5 # Parametro per l'ottimizzatore Adam
 
 # Peso per la L1 Loss nella loss totale del Generatore
