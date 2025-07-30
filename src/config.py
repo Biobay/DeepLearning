@@ -36,7 +36,7 @@ LEARNING_RATE_DISC = 2e-5   # RIDOTTO DRASTICAMENTE per rallentare il Discrimina
 BETA1 = 0.5
 
 # Peso per la L1 Loss nella loss totale del Generatore
-LAMBDA_L1 = 100
+LAMBDA_L1 = 50
 
 # NUOVO: Parametri per il Label Smoothing
 # Usiamo label "morbide" per il Discriminatore per rendergli il compito più difficile
