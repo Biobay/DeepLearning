@@ -1,23 +1,29 @@
-# src/models/model.py (versione CORRETTA)
+# src/models/model.py
 
 import torch.nn as nn
-from src.models.encoder import TextEncoder
-from src.models.decoder import UNetDecoder # <-- 1. CAMBIA NOME NELL'IMPORT
+from .encoder import TextEncoder
+from .decoder import UNetDecoder
+from .discriminator import Discriminator # <-- NUOVO IMPORT
 
 class PikaPikaGen(nn.Module):
+    """
+    Modello completo che ora include Generatore e Discriminatore per il training GAN.
+    """
     def __init__(self, config):
         super().__init__()
         
+        # Il Generatore è composto da Encoder e Decoder U-Net
         self.encoder = TextEncoder(
             model_name=config.ENCODER_MODEL_NAME,
             fine_tune=config.FINE_TUNE_ENCODER
         )
-        
-        # 2. USA LA NUOVA CLASSE E PASSA IL CONFIG COMPLETO
         self.decoder = UNetDecoder(config)
+        
+        # Aggiungiamo il Discriminatore
+        self.discriminator = Discriminator(in_channels=config.OUTPUT_CHANNELS)
 
-    def forward(self, input_ids, attention_mask):
+    def forward_generator(self, input_ids, attention_mask):
+        """Esegue solo il forward pass del generatore."""
         text_features = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        # Il nuovo decoder si aspetta solo le feature del testo
         generated_image, attention_weights = self.decoder(text_features)
         return generated_image, attention_weights
