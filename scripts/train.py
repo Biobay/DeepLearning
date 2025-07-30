@@ -1,4 +1,4 @@
-# scripts/train.py (Versione GAN)
+# scripts/train.py (Versione con Label Smoothing)
 
 import os
 import sys
@@ -27,28 +27,24 @@ def train(cfg):
         config=cfg
     )
 
-    # Inizializza i modelli
     model = PikaPikaGen(cfg).to(device)
-    generator = model # Per chiarezza, chiamiamo il modello completo 'generator'
+    generator = model
     discriminator = model.discriminator
 
-    # Ottimizzatori separati per generatore e discriminatore
     opt_gen = optim.Adam(list(generator.encoder.parameters()) + list(generator.decoder.parameters()), lr=cfg.LEARNING_RATE_GEN, betas=(cfg.BETA1, 0.999))
     opt_disc = optim.Adam(discriminator.parameters(), lr=cfg.LEARNING_RATE_DISC, betas=(cfg.BETA1, 0.999))
     
-    # Funzioni di costo
-    bce_loss = nn.BCEWithLogitsLoss() # Più stabile di BCE + Sigmoid
+    bce_loss = nn.BCEWithLogitsLoss()
     l1_loss = nn.L1Loss()
     
     history = {'gen_loss': [], 'disc_loss': []}
 
-    print("\nInizio addestramento con architettura GAN...")
+    print("\nInizio addestramento con architettura GAN e Label Smoothing...")
     for epoch in range(cfg.EPOCHS):
         generator.train()
         discriminator.train()
         
-        total_gen_loss = 0.0
-        total_disc_loss = 0.0
+        total_gen_loss, total_disc_loss = 0.0, 0.0
         
         progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{cfg.EPOCHS}")
         for batch in progress_bar:
@@ -56,24 +52,23 @@ def train(cfg):
             
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
-            real_images_full = batch['image'].to(device) # (256x256)
+            real_images_full = batch['image'].to(device)
             
-            # Ridimensiona le immagini reali a 215x215 per il confronto
             real_images = F.interpolate(real_images_full, size=(cfg.IMAGE_OUTPUT_SIZE, cfg.IMAGE_OUTPUT_SIZE))
-
-            # Genera immagini false
             fake_images, _ = generator.forward_generator(input_ids, attention_mask)
 
-            # --- Fase 1: Addestramento del Discriminatore ---
+            # --- FASE 1: Addestramento del Discriminatore (con Label Smoothing) ---
             opt_disc.zero_grad()
             
-            # Loss su immagini reali
+            # Loss su immagini reali con label morbide
             disc_real_pred = discriminator(real_images, real_images)
-            loss_disc_real = bce_loss(disc_real_pred, torch.ones_like(disc_real_pred))
+            real_labels = torch.full_like(disc_real_pred, cfg.REAL_LABEL_SMOOTHING, device=device)
+            loss_disc_real = bce_loss(disc_real_pred, real_labels)
             
-            # Loss su immagini false
+            # Loss su immagini false (label rimangono 0)
             disc_fake_pred = discriminator(fake_images.detach(), real_images)
-            loss_disc_fake = bce_loss(disc_fake_pred, torch.zeros_like(disc_fake_pred))
+            fake_labels = torch.zeros_like(disc_fake_pred, device=device)
+            loss_disc_fake = bce_loss(disc_fake_pred, fake_labels)
             
             loss_disc = (loss_disc_real + loss_disc_fake) / 2
             loss_disc.backward()
@@ -83,7 +78,9 @@ def train(cfg):
             opt_gen.zero_grad()
             
             disc_pred_for_gen = discriminator(fake_images, real_images)
-            loss_gen_gan = bce_loss(disc_pred_for_gen, torch.ones_like(disc_pred_for_gen))
+            # Il generatore vuole ingannare il discriminatore, quindi punta a label "reali" (1)
+            gan_labels = torch.ones_like(disc_pred_for_gen, device=device)
+            loss_gen_gan = bce_loss(disc_pred_for_gen, gan_labels)
             
             loss_gen_l1 = l1_loss(fake_images, real_images) * cfg.LAMBDA_L1
             
@@ -102,7 +99,7 @@ def train(cfg):
         
         print(f"Epoch {epoch+1}/{cfg.EPOCHS} -> Gen Loss: {avg_gen_loss:.4f} | Disc Loss: {avg_disc_loss:.4f}")
         
-        # Salvataggio
+        # --- SALVATAGGI --- (Nessuna validazione in questo ciclo GAN semplificato)
         if (epoch + 1) % cfg.SAVE_IMAGE_EPOCHS == 0:
             save_image(real_images, os.path.join(cfg.GENERATED_IMAGE_DIR, f"real_images_epoch_{epoch+1}.png"), normalize=True)
             save_image(fake_images, os.path.join(cfg.GENERATED_IMAGE_DIR, f"generated_images_epoch_{epoch+1}.png"), normalize=True)
