@@ -1,35 +1,45 @@
+# =============================================================================
+# PYTORCH & CUDA COMPATIBILITY
+# =============================================================================
+# Specifica il repository di PyTorch per la versione compilata con CUDA 12.1,
+# necessaria per le GPU NVIDIA più recenti (serie RTX 40xx/50xx).
+--extra-index-url https://download.pytorch.org/whl/cu121
+
+# Librerie principali di PyTorch
 torch
 torchvision
+# torchaudio # Commentato perché non necessario per questo progetto di computer vision
+
+# =============================================================================
+# CORE LIBRARIES
+# =============================================================================
+# Deep Learning & NLP
 transformers
+accelerate
 datasets
+
+# Data Handling & Scientific Computing
 pandas
 numpy
+scikit-learn
+scikit-image
+opencv-python
+
+# Image Handling
 pillow
+
+# =============================================================================
+# UTILITIES & VISUALIZATION
+# =============================================================================
+# Plotting e Visualizzazione
 matplotlib
 seaborn
+
+# Monitoring e UI
 tqdm
 tensorboard
+ipywidgets
 gradio
-scikit-learn
-opencv-python
-accelerate
-ipywidgets
-scikit-image
+
+# Metriche di similarità percettiva
 lpips
-# requirements.txt (versione aggiornata)
-
-# Specifica l'URL dell'indice per i pacchetti PyTorch
---index-url https://download.pytorch.org/whl/cu121
-
-# Installa PyTorch e torchvision
-torch
-torchvision
-# torchaudio # Probabilmente non ti serve, puoi commentarlo
-
-# Le altre tue dipendenze
-transformers
-pandas
-tqdm
-scikit-image
-ipywidgets
-matplotlib
