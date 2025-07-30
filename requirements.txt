@@ -3,9 +3,7 @@
 # =============================================================================
 # Specifica il repository di PyTorch per la versione compilata con CUDA 12.1,
 # necessaria per le GPU NVIDIA più recenti (serie RTX 40xx/50xx).
---extra-index-url https://download.pytorch.org/whl/cu121
-
-# Librerie principali di PyTorch
+--extra-index-url https://download.pytorch.org/whl/nightly/cu121
 torch
 torchvision
 # torchaudio # Commentato perché non necessario per questo progetto di computer vision
