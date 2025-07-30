@@ -11,6 +11,12 @@ IMAGE_SIZE = 215 # Manteniamo la risoluzione originale
 BATCH_SIZE = 8   # Ridotto per accomodare la U-Net che usa più memoria
 NUM_WORKERS = 0  # IMPOSTATO A 0 PER EVITARE ERRORI DI SHARED MEMORY
 
+IMAGE_OUTPUT_SIZE = 215
+
+# Dimensione interna usata dalla U-Net per un funzionamento stabile
+# Deve essere una potenza di 2 (es. 128, 256)
+MODEL_INTERNAL_SIZE = 256
+
 # --- Parametri del Modello ---
 # Encoder (invariato)
 ENCODER_MODEL_NAME = "prajjwal1/bert-mini"
