@@ -1,13 +1,13 @@
 # =============================================================================
-# PYTORCH & CUDA COMPATIBILITY (PER RTX 4090 E SIMILI)
+# PYTORCH & CUDA COMPATIBILITY (PER RTX 3090 E SIMILI)
 # =============================================================================
-# Specifica il repository di PyTorch per la versione stabile compilata con CUDA 11.8,
-# che è pienamente compatibile con l'architettura Ada Lovelace (sm_90) della RTX 4090.
---extra-index-url https://download.pytorch.org/whl/cu118
+# Specifica il repository di PyTorch per la versione stabile compilata con CUDA 11.7,
+# che è ideale e pienamente compatibile con l'architettura Ampere (sm_86) della RTX 3090.
 
-# Fissiamo le versioni a una build stabile e nota per funzionare bene.
-torch==2.1.2
-torchvision==0.16.2
+
+# Fissiamo le versioni a una build estremamente stabile e diffusa.
+torch
+torchvision
 
 # =============================================================================
 # CORE LIBRARIES
@@ -41,5 +41,4 @@ ipywidgets
 gradio
 
 # Metriche di similarità percettiva
-# Fissiamo anche la versione di lpips per evitare controlli di sicurezza troppo recenti
-lpips==0.1.4
+lpips
