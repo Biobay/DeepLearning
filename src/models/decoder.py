@@ -2,87 +2,107 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .attention import CrossAttentionBlock
 
-class UNetDownBlock(nn.Module):
-    def __init__(self, in_c, out_c, norm=True):
+# --- Layer Chiave: AdaIN (Adaptive Instance Normalization) ---
+class AdaIN(nn.Module):
+    def __init__(self, style_dim, num_channels):
         super().__init__()
-        layers = [nn.Conv2d(in_c, out_c, 4, 2, 1, bias=False)]
-        if norm: layers.append(nn.BatchNorm2d(out_c))
-        layers.append(nn.LeakyReLU(0.2))
-        self.model = nn.Sequential(*layers)
-    def forward(self, x): return self.model(x)
+        self.norm = nn.InstanceNorm2d(num_channels)
+        self.style_transform = nn.Linear(style_dim, num_channels * 2)
 
-class UNetUpBlock(nn.Module):
-    def __init__(self, in_c, out_c):
+    def forward(self, image_features, style_vector):
+        normalized_features = self.norm(image_features)
+        style = self.style_transform(style_vector).unsqueeze(-1).unsqueeze(-1)
+        gamma, beta = style.chunk(2, dim=1)
+        return gamma * normalized_features + beta
+
+# --- Blocco di Sintesi (Upsampling + Convoluzioni + AdaIN) ---
+class SynthesisBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, style_dim):
         super().__init__()
-        self.model = nn.Sequential(
-            nn.ConvTranspose2d(in_c, out_c, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(out_c),
-            nn.ReLU(True)
-        )
-    def forward(self, x, skip):
-        x = torch.cat([x, skip], dim=1)
-        return self.model(x)
+        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        self.adain1 = AdaIN(style_dim, out_channels)
+        self.relu1 = nn.LeakyReLU(0.2)
+        
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+        self.adain2 = AdaIN(style_dim, out_channels)
+        self.relu2 = nn.LeakyReLU(0.2)
 
-class UNetDecoder(nn.Module):
+    def forward(self, x, style_vector):
+        x = self.up(x)
+        x = self.conv1(x)
+        x = self.adain1(x, style_vector)
+        x = self.relu1(x)
+        x = self.conv2(x)
+        x = self.adain2(x, style_vector)
+        x = self.relu2(x)
+        return x
+
+# --- Il Decoder/Generatore Completo ---
+class StyleBasedGenerator(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        ngf = 64
-
-        # Discesa
-        self.d1 = UNetDownBlock(cfg.OUTPUT_CHANNELS, ngf, norm=False) # 128
-        self.d2 = UNetDownBlock(ngf, ngf * 2)             # 64
-        self.d3 = UNetDownBlock(ngf * 2, ngf * 4)           # 32
-        self.d4 = UNetDownBlock(ngf * 4, ngf * 8)           # 16
+        style_dim = cfg.STYLE_DIM
         
-        # Bottleneck
-        self.bottleneck = UNetDownBlock(ngf * 8, ngf * 8) # 8
+        # 1. Mapping Network (MLP) - Trasforma il testo in stile
+        mapping_layers = [nn.Linear(cfg.LATENT_DIM, style_dim), nn.LeakyReLU(0.2)]
+        for _ in range(cfg.MAPPING_NETWORK_DEPTH - 1):
+            mapping_layers.extend([nn.Linear(style_dim, style_dim), nn.LeakyReLU(0.2)])
+        self.mapping_network = nn.Sequential(*mapping_layers)
 
-        # Risalita
-        self.u1 = UNetUpBlock(ngf * 8, ngf * 8)
-        self.u2 = UNetUpBlock(ngf * 8 * 2, ngf * 4)
-        self.u3 = UNetUpBlock(ngf * 4 * 2, ngf * 2)
-        self.u4 = UNetUpBlock(ngf * 2 * 2, ngf)
+        # 2. Input Costante - Il punto di partenza che il modello impara
+        self.initial_constant = nn.Parameter(torch.randn(1, 512, 4, 4))
         
-        # Attention
-        self.attn1 = CrossAttentionBlock(ngf * 8, cfg.CONTEXT_DIM, cfg.NUM_HEADS)
-        self.attn2 = CrossAttentionBlock(ngf * 4, cfg.CONTEXT_DIM, cfg.NUM_HEADS)
-
-        # Output
-        self.final_up = nn.ConvTranspose2d(ngf * 2, cfg.OUTPUT_CHANNELS, 4, 2, 1)
+        # 3. Blocco Iniziale e Blocchi di Sintesi
+        self.initial_adain1 = AdaIN(style_dim, 512)
+        self.initial_adain2 = AdaIN(style_dim, 512)
+        self.initial_conv = nn.Conv2d(512, 512, kernel_size=3, padding=1)
+        
+        # Blocchi per upsampling da 4x4 a 256x256
+        # 4x4 -> 8x8
+        self.synth_block1 = SynthesisBlock(512, 512, style_dim) 
+        # 8x8 -> 16x16
+        self.synth_block2 = SynthesisBlock(512, 512, style_dim) 
+        # 16x16 -> 32x32
+        self.synth_block3 = SynthesisBlock(512, 256, style_dim) 
+        # 32x32 -> 64x64
+        self.synth_block4 = SynthesisBlock(256, 128, style_dim) 
+        # 64x64 -> 128x128
+        self.synth_block5 = SynthesisBlock(128, 64, style_dim)  
+        # 128x128 -> 256x256
+        self.synth_block6 = SynthesisBlock(64, 32, style_dim)   
+        
+        # 4. Layer di Output
+        self.to_rgb = nn.Conv2d(32, cfg.OUTPUT_CHANNELS, kernel_size=1)
         self.final_act = nn.Tanh()
 
     def forward(self, text_features):
-        B, C, H, W = text_features.shape[0], self.cfg.OUTPUT_CHANNELS, self.cfg.MODEL_INTERNAL_SIZE, self.cfg.MODEL_INTERNAL_SIZE
-        x = torch.randn(B, C, H, W, device=text_features.device)
+        batch_size = text_features.size(0)
         
-        def apply_attention(x, attn_block, context):
-            B, C, H, W = x.shape
-            img_feat = x.view(B, C, H * W).permute(0, 2, 1)
-            attn_feat = attn_block(img_feat, context)
-            return attn_feat.permute(0, 2, 1).view(B, C, H, W)
+        # 1. Aggrega e trasforma il testo in un vettore di stile 'w'
+        latent_vector = text_features.mean(dim=1) # (B, LATENT_DIM)
+        style_vector = self.mapping_network(latent_vector) # (B, STYLE_DIM)
         
-        # Discesa
-        d1 = self.d1(x)
-        d2 = self.d2(d1)
-        d3 = self.d3(d2)
-        d4 = self.d4(d3)
+        # 2. Inizia dal tensore costante e applica il primo stile
+        x = self.initial_constant.repeat(batch_size, 1, 1, 1)
+        x = self.initial_adain1(x, style_vector)
+        x = self.initial_conv(x)
+        x = self.initial_adain2(x, style_vector)
         
-        b = self.bottleneck(d4)
+        # 3. Passa attraverso i blocchi di sintesi, modulando con lo stile a ogni passo
+        x = self.synth_block1(x, style_vector)
+        x = self.synth_block2(x, style_vector)
+        x = self.synth_block3(x, style_vector)
+        x = self.synth_block4(x, style_vector)
+        x = self.synth_block5(x, style_vector)
+        x = self.synth_block6(x, style_vector)
 
-        # Risalita con attention
-        u1 = self.u1(b, d4)
-        u1 = apply_attention(u1, self.attn1, text_features)
+        # 4. Converte in immagine RGB
+        x = self.to_rgb(x) # x è (B, 3, 256, 256)
         
-        u2 = self.u2(u1, d3)
-        u2 = apply_attention(u2, self.attn2, text_features)
+        # 5. Ridimensiona all'output finale richiesto
+        final_image = F.interpolate(x, size=self.cfg.IMAGE_OUTPUT_SIZE, mode='bilinear', align_corners=False)
         
-        u3 = self.u3(u2, d2)
-        u4 = self.u4(u3, d1)
-
-        out = self.final_up(u4)
-        final_image = F.interpolate(out, size=self.cfg.IMAGE_OUTPUT_SIZE, mode='bilinear', align_corners=False)
-        
-        return self.final_act(final_image), None
+        return self.final_act(final_image), None # Non ci sono più pesi di attention da restituire
