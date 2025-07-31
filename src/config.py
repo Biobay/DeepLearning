@@ -11,6 +11,8 @@ MODEL_INTERNAL_SIZE = 256
 BATCH_SIZE = 8
 NUM_WORKERS = 0
 LEARNING_RATE = 2e-5
+RESULTS_DIR = "results_sanity_check"
+
 # =============================================================================
 # ## PARAMETRI COMPLETI DEL MODELLO ##
 # =============================================================================
