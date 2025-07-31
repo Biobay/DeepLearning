@@ -1,65 +1,80 @@
-# scripts/train.py
-import os, sys, torch, torch.nn as nn, torch.optim as optim, torch.nn.functional as F
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from torchvision.utils import save_image
-from tqdm import tqdm
+# In scripts/train.py
 
-import src.config as cfg
-from src.data.dataset import create_dataloaders
-from src.models.model import PikaPikaGen
+# ...
+import torch
+# ...
 
 def train(cfg):
-    device = torch.device(cfg.DEVICE)
-    os.makedirs(cfg.CHECKPOINT_DIR, exist_ok=True); os.makedirs(cfg.GENERATED_IMAGE_DIR, exist_ok=True)
-    
-    train_loader, val_loader, _ = create_dataloaders(
-        csv_path=os.path.join(cfg.DATA_DIR, cfg.CSV_NAME), img_dir=cfg.IMAGE_DIR,
-        splits_dir=cfg.SPLITS_DIR, config=cfg)
+    # ... (tutto il setup)
 
-    model = PikaPikaGen(cfg).to(device)
-    optimizer = optim.Adam(list(model.encoder.parameters()) + list(model.decoder.parameters()), lr=cfg.LEARNING_RATE, weight_decay=cfg.WEIGHT_DECAY)
-    criterion = nn.L1Loss()
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10)
-    history = {'train_loss': [], 'val_loss': []}
-
-    print("\nInizio addestramento finale con U-Net a Cross-Attention e L1 Loss...")
-    for epoch in range(cfg.EPOCHS):
+    print("\nINIZIO SESSIONE DI DEBUG...")
+    for epoch in range(1): # ESEGUIAMO UNA SOLA EPOCA
         model.train()
-        total_train_loss = 0.0
-        for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{cfg.EPOCHS}"):
+        
+        for batch_idx, batch in enumerate(train_loader):
             if batch is None: continue
-            ids, mask, real_full = batch['input_ids'].to(device), batch['attention_mask'].to(device), batch['image'].to(device)
-            real = F.interpolate(real_full, size=cfg.IMAGE_OUTPUT_SIZE)
-            gen_img, _ = model.forward_generator(ids, mask)
-            loss = criterion(gen_img, real)
-            optimizer.zero_grad(); loss.backward(); optimizer.step()
-            total_train_loss += loss.item()
-        
-        avg_train_loss = total_train_loss / len(train_loader)
-        history['train_loss'].append(avg_train_loss)
+            if batch_idx > 5: break # ESEGUIAMO SOLO 5 BATCH PER VELOCIZZARE
 
-        model.eval()
-        total_val_loss = 0.0
-        with torch.no_grad():
-            for val_batch in val_loader:
-                if val_batch is None: continue
-                ids, mask, real_full = val_batch['input_ids'].to(device), val_batch['attention_mask'].to(device), val_batch['image'].to(device)
-                real = F.interpolate(real_full, size=cfg.IMAGE_OUTPUT_SIZE)
-                gen_img, _ = model.forward_generator(ids, mask)
-                total_val_loss += criterion(gen_img, real).item()
-        
-        avg_val_loss = total_val_loss / len(val_loader) if len(val_loader) > 0 else 0
-        history['val_loss'].append(avg_val_loss)
-        print(f"-> Epoch {epoch+1}/{cfg.EPOCHS} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
-        scheduler.step(avg_val_loss)
-        
-        if (epoch+1) % cfg.SAVE_IMAGE_EPOCHS == 0:
-            save_image(torch.cat([real[:4], gen_img[:4]]), os.path.join(cfg.GENERATED_IMAGE_DIR, f"e{epoch+1}.png"), normalize=True, nrow=4)
-            print("Immagini salvate.")
-        if (epoch+1) % cfg.CHECKPOINT_SAVE_EPOCHS == 0:
-            torch.save(model.state_dict(), os.path.join(cfg.CHECKPOINT_DIR, f"gen_e{epoch+1}.pth"))
-            print("Checkpoint salvato.")
+            print(f"\n--- DEBUG BATCH {batch_idx} ---")
+
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            real_images = batch['image'].to(device)
+
+            # 1. CONTROLLO DATI DI INPUT
+            print(f"Shape input_ids: {input_ids.shape}")
+            print(f"Shape real_images: {real_images.shape}")
+            print(f"Valore medio real_images: {real_images.mean().item():.4f}")
+            if torch.isnan(real_images).any() or torch.isinf(real_images).any():
+                print("!!!!!! ERRORE: NaN o Inf nelle immagini reali !!!!!!")
+                return
+
+            # --- ESEGUIAMO IL FORWARD PASS DEL GENERATORE ---
+            text_features = model.encoder(input_ids, attention_mask)
             
-    return history
+            # 2. CONTROLLO OUTPUT ENCODER
+            print(f"Shape text_features: {text_features.shape}")
+            print(f"Valore medio text_features: {text_features.mean().item():.4f}")
+            if torch.isnan(text_features).any() or torch.isinf(text_features).any():
+                print("!!!!!! ERRORE: NaN o Inf nell'output dell'encoder !!!!!!")
+                return
+            
+            generated_images, _ = model.decoder(text_features)
+            
+            # 3. CONTROLLO OUTPUT GENERATORE
+            print(f"Shape generated_images: {generated_images.shape}")
+            print(f"Valore medio generated_images: {generated_images.mean().item():.4f}")
+            
+            real_images_resized = F.interpolate(real_images, size=(cfg.IMAGE_OUTPUT_SIZE, cfg.IMAGE_OUTPUT_SIZE))
+            loss = criterion(generated_images, real_images_resized)
+            
+            print(f"Loss Iniziale: {loss.item():.4f}")
 
-if __name__ == '__main__': train(cfg)
+            # --- BACKWARD PASS E CONTROLLO GRADIENTI ---
+            optimizer.zero_grad()
+            loss.backward()
+            
+            # 4. CONTROLLO GRADIENTI
+            total_norm_encoder = 0
+            for p in model.encoder.parameters():
+                if p.grad is not None:
+                    param_norm = p.grad.data.norm(2)
+                    total_norm_encoder += param_norm.item() ** 2
+            total_norm_encoder = total_norm_encoder ** 0.5
+            print(f"Norma L2 dei gradienti dell'Encoder: {total_norm_encoder:.4f}")
+
+            total_norm_decoder = 0
+            for p in model.decoder.parameters():
+                if p.grad is not None:
+                    param_norm = p.grad.data.norm(2)
+                    total_norm_decoder += param_norm.item() ** 2
+            total_norm_decoder = total_norm_decoder ** 0.5
+            print(f"Norma L2 dei gradienti del Decoder: {total_norm_decoder:.4f}")
+            
+            if total_norm_encoder == 0 or total_norm_decoder == 0:
+                print("!!!!!! ERRORE: Gradiente nullo! Il modello non sta imparando. !!!!!!")
+
+            optimizer.step()
+            
+    print("\n--- DEBUG COMPLETATO ---")
+    return {} # Terminiamo dopo il debug
