@@ -1,83 +1,80 @@
 # src/models/decoder.py
-import torch, torch.nn as nn, torch.nn.functional as F
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from .attention import CrossAttentionBlock
 
-class UNetDownBlock(nn.Module):
-    def __init__(self, in_c, out_c, norm=True):
-        super().__init__()
-        layers = [nn.Conv2d(in_c, out_c, 4, 2, 1, bias=not norm)]
-        if norm: layers.append(nn.BatchNorm2d(out_c))
-        layers.append(nn.LeakyReLU(0.2))
-        self.model = nn.Sequential(*layers)
-    def forward(self, x): return self.model(x)
-
-class UNetUpBlock(nn.Module):
-    def __init__(self, in_c, out_c):
-        super().__init__()
-        self.model = nn.Sequential(
-            nn.ConvTranspose2d(in_c, out_c, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(out_c), nn.ReLU(True))
-    def forward(self, x, skip):
-        x = torch.cat([x, skip], dim=1)
-        return self.model(x)
+# --- ARCHITETTURA U-NET ROBUSTA (ISPIRATA A PIX2PIXHD) ---
 
 class UNetDecoder(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        c = cfg.UNET_CHANNELS
+        ngf = 64 # Numero di feature base
 
-        # Discesa
-        self.d1 = UNetDownBlock(cfg.OUTPUT_CHANNELS, c[0], norm=False) # 128
-        self.d2 = UNetDownBlock(c[0], c[1])           # 64
-        self.d3 = UNetDownBlock(c[1], c[2])           # 32
-        self.d4 = UNetDownBlock(c[2], c[3])           # 16
+        # --- BLOCCHI DI DISCESA (ENCODER) ---
+        self.down1 = nn.Conv2d(cfg.OUTPUT_CHANNELS, ngf, kernel_size=4, stride=2, padding=1)
+        self.down2 = nn.Sequential(nn.LeakyReLU(0.2), nn.Conv2d(ngf, ngf * 2, 4, 2, 1), nn.BatchNorm2d(ngf * 2))
+        self.down3 = nn.Sequential(nn.LeakyReLU(0.2), nn.Conv2d(ngf * 2, ngf * 4, 4, 2, 1), nn.BatchNorm2d(ngf * 4))
+        self.down4 = nn.Sequential(nn.LeakyReLU(0.2), nn.Conv2d(ngf * 4, ngf * 8, 4, 2, 1), nn.BatchNorm2d(ngf * 8))
+        self.down5 = nn.Sequential(nn.LeakyReLU(0.2), nn.Conv2d(ngf * 8, ngf * 8, 4, 2, 1), nn.BatchNorm2d(ngf * 8))
         
-        # Bottleneck
-        self.bottleneck = UNetDownBlock(c[3], c[3]) # 8
-
-        # Risalita
-        self.u1 = UNetUpBlock(c[3], c[3])
-        self.u2 = UNetUpBlock(c[3] * 2, c[2])
-        self.u3 = UNetUpBlock(c[2] * 2, c[1])
-        self.u4 = UNetUpBlock(c[1] * 2, c[0])
+        # --- BOTTLENECK ---
+        self.bottleneck = nn.Sequential(nn.LeakyReLU(0.2), nn.Conv2d(ngf * 8, ngf * 8, 4, 2, 1), nn.ReLU())
         
-        # Attention Blocks
-        self.attn1 = CrossAttentionBlock(c[3], cfg.CONTEXT_DIM, cfg.NUM_HEADS)
-        self.attn2 = CrossAttentionBlock(c[2], cfg.CONTEXT_DIM, cfg.NUM_HEADS)
-
-        # Output
-        self.final_up = nn.ConvTranspose2d(c[0] * 2, cfg.OUTPUT_CHANNELS, 4, 2, 1)
-        self.final_act = nn.Tanh()
+        # --- BLOCCHI DI RISALITA (DECODER) ---
+        self.up1 = nn.Sequential(nn.ConvTranspose2d(ngf * 8, ngf * 8, 4, 2, 1), nn.BatchNorm2d(ngf * 8))
+        self.up2 = nn.Sequential(nn.ReLU(), nn.ConvTranspose2d(ngf * 8 * 2, ngf * 8, 4, 2, 1), nn.BatchNorm2d(ngf * 8))
+        self.up3 = nn.Sequential(nn.ReLU(), nn.ConvTranspose2d(ngf * 8 * 2, ngf * 4, 4, 2, 1), nn.BatchNorm2d(ngf * 4))
+        self.up4 = nn.Sequential(nn.ReLU(), nn.ConvTranspose2d(ngf * 4 * 2, ngf * 2, 4, 2, 1), nn.BatchNorm2d(ngf * 2))
+        self.up5 = nn.Sequential(nn.ReLU(), nn.ConvTranspose2d(ngf * 2 * 2, ngf, 4, 2, 1), nn.BatchNorm2d(ngf))
+        
+        # --- LAYER FINALE ---
+        self.final_up = nn.Sequential(nn.ReLU(), nn.ConvTranspose2d(ngf * 2, cfg.OUTPUT_CHANNELS, 4, 2, 1), nn.Tanh())
+        
+        # --- BLOCCHI DI ATTENZIONE ---
+        self.attn1 = CrossAttentionBlock(query_dim=ngf * 8, context_dim=cfg.CONTEXT_DIM, num_heads=cfg.NUM_HEADS)
+        self.attn2 = CrossAttentionBlock(query_dim=ngf * 4, context_dim=cfg.CONTEXT_DIM, num_heads=cfg.NUM_HEADS)
 
     def forward(self, text_features):
-        B, C, H, W = text_features.shape[0], self.cfg.OUTPUT_CHANNELS, self.cfg.MODEL_INTERNAL_SIZE, self.cfg.MODEL_INTERNAL_SIZE
-        x = torch.randn(B, C, H, W, device=text_features.device)
+        batch_size = text_features.size(0)
+        x = torch.randn(batch_size, self.cfg.OUTPUT_CHANNELS, self.cfg.MODEL_INTERNAL_SIZE, self.cfg.MODEL_INTERNAL_SIZE, device=text_features.device)
         
         def apply_attention(x, attn_block, context):
-            B, C_img, H_img, W_img = x.shape
-            img_feat = x.view(B, C_img, H_img * W_img).permute(0, 2, 1)
+            B, C, H, W = x.shape
+            img_feat = x.view(B, C, H * W).permute(0, 2, 1)
             attn_feat = attn_block(img_feat, context)
-            return attn_feat.permute(0, 2, 1).view(B, C_img, H_img, W_img)
-        
-        # Discesa
-        d1 = self.d1(x)
-        d2 = self.d2(d1)
-        d3 = self.d3(d2)
-        d4 = self.d4(d3)
-        b = self.bottleneck(d4)
+            return attn_feat.permute(0, 2, 1).view(B, C, H, W)
 
-        # Risalita con attention
-        u1 = self.u1(b, d4)
-        u1 = apply_attention(u1, self.attn1, text_features)
+        # --- PERCORSO DI DISCESA ---
+        d1 = self.down1(x)    # 256 -> 128
+        d2 = self.down2(d1)   # 128 -> 64
+        d3 = self.down3(d2)   # 64 -> 32
+        d4 = self.down4(d3)   # 32 -> 16
+        d5 = self.down5(d4)   # 16 -> 8
         
-        u2 = self.u2(u1, d3)
-        u2 = apply_attention(u2, self.attn2, text_features)
+        b = self.bottleneck(d5) # 8 -> 4
         
-        u3 = self.u3(u2, d2)
-        u4 = self.u4(u3, d1)
-
-        out = self.final_up(u4)
+        # --- PERCORSO DI RISALITA ---
+        u1 = self.up1(b)                 # 4 -> 8
+        u1 = torch.cat([u1, d5], dim=1)  # Concatena con d5 (8x8)
+        u1 = apply_attention(u1, self.attn1, text_features) # Applica attention qui
+        
+        u2 = self.up2(u1)                # 8 -> 16
+        u2 = torch.cat([u2, d4], dim=1)  # Concatena con d4 (16x16)
+        
+        u3 = self.up3(u2)                # 16 -> 32
+        u3 = torch.cat([u3, d3], dim=1)  # Concatena con d3 (32x32)
+        u3 = apply_attention(u3, self.attn2, text_features) # Applica attention qui
+        
+        u4 = self.up4(u3)                # 32 -> 64
+        u4 = torch.cat([u4, d2], dim=1)  # Concatena con d2 (64x64)
+        
+        u5 = self.up5(u4)                # 64 -> 128
+        u5 = torch.cat([u5, d1], dim=1)  # Concatena con d1 (128x128)
+        
+        out = self.final_up(u5)          # 128 -> 256
+        
         final_image = F.interpolate(out, size=self.cfg.IMAGE_OUTPUT_SIZE, mode='bilinear', align_corners=False)
-        
-        return self.final_act(final_image), None
+        return final_image, None
