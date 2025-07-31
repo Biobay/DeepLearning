@@ -48,3 +48,4 @@ CHECKPOINT_DIR = f"{RESULTS_DIR}/checkpoints"
 GENERATED_IMAGE_DIR = f"{RESULTS_DIR}/generated_images"
 SAVE_IMAGE_EPOCHS = 10 # Salviamo meno spesso per non riempire il disco
 CHECKPOINT_SAVE_EPOCHS = 10
+DROPOUT_RATE = 0.5
