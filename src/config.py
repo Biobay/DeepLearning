@@ -58,8 +58,8 @@ STAGE1_IMAGE_SIZE = 64  # Dimensione delle immagini per la Fase I (Stage-I GAN)
 # --- Parametri per la Fase II (StackGAN Stage-II) (con percorsi assoluti) ---
 STAGE2_IMAGE_SIZE = 215 # Dimensione delle immagini ad alta risoluzione (come da requisiti del progetto)
 EPOCHS_S2 = 100 # Numero di epoche per la Fase II
-LEARNING_RATE_S2 = 1e-4 # Learning rate per gli ottimizzatori della Fase II
-LAMBDA_L1_S2 = 100 # Peso per la loss L1 dello Stage-II
+LEARNING_RATE_S2 = 2e-4 # Learning rate per gli ottimizzatori della Fase II
+LAMBDA_L1_S2 = 10 # Peso per la loss L1 dello Stage-II
 CHECKPOINT_DIR_S1 = CHECKPOINT_DIR # Ora punta già alla cartella corretta e assoluta
 CHECKPOINT_DIR_S2 = os.path.join(RESULTS_DIR, "checkpoints_s2")
 GENERATED_IMAGE_DIR_S2 = os.path.join(RESULTS_DIR, "generated_images_s2")
