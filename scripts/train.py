@@ -1,4 +1,4 @@
-# scripts/train.py
+# scripts/train.py (Versione Finale per testare il Decoder con Input Strutturato)
 
 import os
 import sys
@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 import src.config as config
 from src.data.dataset import create_dataloaders
-from src.models.model import PikaPikaGen
+from src.models.model import PikaPikaGen # model.py deve usare il nuovo decoder
 
 def train(cfg):
     device = torch.device(cfg.DEVICE)
@@ -28,96 +28,99 @@ def train(cfg):
     )
 
     model = PikaPikaGen(cfg).to(device)
-    generator = model
-    discriminator = model.discriminator
 
-    # =============================================================================
-    # ## MODIFICA CHIAVE: OTTIMIZZATORE CON LEARNING RATE DIFFERENZIATI ##
-    # =============================================================================
-    # Si usa un learning rate più basso per il Text Encoder pre-addestrato (fine-tuning)
-    # e un learning rate standard per il Decoder U-Net (addestrato da zero).
-    # Questo previene il "vanishing gradient" e stabilizza l'apprendimento del testo.
-    opt_gen = optim.Adam([
-        {'params': generator.encoder.parameters(), 'lr': 1e-5}, # LR basso per BERT
-        {'params': generator.decoder.parameters(), 'lr': cfg.LEARNING_RATE_GEN} # LR standard per U-Net
-    ], betas=(cfg.BETA1, 0.999))
+    # Un singolo ottimizzatore per l'intero modello generativo (Encoder + Decoder)
+    optimizer = optim.Adam(model.parameters(), lr=cfg.LEARNING_RATE, weight_decay=cfg.WEIGHT_DECAY)
     
-    # L'ottimizzatore del discriminatore rimane lo stesso
-    opt_disc = optim.Adam(discriminator.parameters(), lr=cfg.LEARNING_RATE_DISC, betas=(cfg.BETA1, 0.999))
+    # Usiamo solo L1 Loss per questo test
+    criterion = nn.L1Loss()
     
-    bce_loss = nn.BCEWithLogitsLoss()
-    l1_loss = nn.L1Loss()
-    
-    history = {'gen_loss': [], 'disc_loss': []}
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, 'min', 
+        patience=cfg.SCHEDULER_PATIENCE, 
+        factor=cfg.SCHEDULER_FACTOR
+    )
 
-    print("\nInizio addestramento GAN con Learning Rate Differenziati...")
+    history = {'train_loss': [], 'val_loss': []}
+    
+    print("\nInizio addestramento con Input Strutturato e L1 Loss...")
     for epoch in range(cfg.EPOCHS):
-        generator.train()
-        discriminator.train()
+        model.train()
+        total_train_loss = 0.0
+        progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{cfg.EPOCHS} [Training]")
         
-        total_gen_loss, total_disc_loss = 0.0, 0.0
-        
-        progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{cfg.EPOCHS}")
         for batch in progress_bar:
             if batch is None: continue
             
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
-            real_images_full = batch['image'].to(device)
-            
-            real_images = F.interpolate(real_images_full, size=(cfg.IMAGE_OUTPUT_SIZE, cfg.IMAGE_OUTPUT_SIZE))
-            fake_images, _ = generator.forward_generator(input_ids, attention_mask)
+            real_images = batch['image'].to(device)
 
-            # --- FASE 1: Addestramento del Discriminatore ---
-            opt_disc.zero_grad()
-            disc_real_pred = discriminator(real_images, real_images)
-            real_labels = torch.full_like(disc_real_pred, cfg.REAL_LABEL_SMOOTHING, device=device)
-            loss_disc_real = bce_loss(disc_real_pred, real_labels)
+            generated_images, _ = model.forward_generator(input_ids, attention_mask)
             
-            disc_fake_pred = discriminator(fake_images.detach(), real_images)
-            fake_labels = torch.zeros_like(disc_fake_pred, device=device)
-            loss_disc_fake = bce_loss(disc_fake_pred, fake_labels)
+            real_images_resized = F.interpolate(real_images, size=(cfg.IMAGE_OUTPUT_SIZE, cfg.IMAGE_OUTPUT_SIZE))
+            loss = criterion(generated_images, real_images_resized)
             
-            loss_disc = (loss_disc_real + loss_disc_fake) / 2
-            loss_disc.backward()
-            opt_disc.step()
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            total_train_loss += loss.item()
+            progress_bar.set_postfix(loss=loss.item())
+        
+        avg_train_loss = total_train_loss / len(train_loader)
+        history['train_loss'].append(avg_train_loss)
 
-            # --- FASE 2: Addestramento del Generatore ---
-            opt_gen.zero_grad()
-            disc_pred_for_gen = discriminator(fake_images, real_images)
-            gan_labels = torch.ones_like(disc_pred_for_gen, device=device)
-            loss_gen_gan = bce_loss(disc_pred_for_gen, gan_labels)
-            
-            loss_gen_l1 = l1_loss(fake_images, real_images) * cfg.LAMBDA_L1
-            
-            loss_gen = loss_gen_gan + loss_gen_l1
-            loss_gen.backward()
-            opt_gen.step()
-            
-            total_gen_loss += loss_gen.item()
-            total_disc_loss += loss_disc.item()
-            progress_bar.set_postfix(G_loss=loss_gen.item(), D_loss=loss_disc.item())
+        # --- FASE DI VALIDAZIONE COMPLETA ---
+        model.eval()
+        total_val_loss = 0.0
+        val_batches = 0
+        with torch.no_grad():
+            for val_batch in val_loader:
+                if val_batch is None: continue
+                val_batches += 1
+                
+                input_ids = val_batch['input_ids'].to(device)
+                attention_mask = val_batch['attention_mask'].to(device)
+                real_images = val_batch['image'].to(device)
+
+                generated_images, _ = model.forward_generator(input_ids, attention_mask)
+                
+                real_images_resized = F.interpolate(real_images, size=(cfg.IMAGE_OUTPUT_SIZE, cfg.IMAGE_OUTPUT_SIZE))
+                val_loss = criterion(generated_images, real_images_resized)
+                
+                total_val_loss += val_loss.item()
         
-        avg_gen_loss = total_gen_loss / len(train_loader)
-        avg_disc_loss = total_disc_loss / len(train_loader)
-        history['gen_loss'].append(avg_gen_loss)
-        history['disc_loss'].append(avg_disc_loss)
+        if val_batches > 0:
+            avg_val_loss = total_val_loss / val_batches
+        else:
+            avg_val_loss = 0.0 # Se non ci sono batch di validazione
         
-        print(f"Epoch {epoch+1}/{cfg.EPOCHS} -> Gen Loss: {avg_gen_loss:.4f} | Disc Loss: {avg_disc_loss:.4f}")
+        history['val_loss'].append(avg_val_loss)
         
-        # --- SALVATAGGI ---
+        print(f"Epoch {epoch+1}/{cfg.EPOCHS} -> Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
+        
+        # Lo scheduler dovrebbe basarsi sulla loss di validazione
+        scheduler.step(avg_val_loss)
+        
+        # --- SALVATAGGIO CHECKPOINT E IMMAGINI ---
         if (epoch + 1) % cfg.SAVE_IMAGE_EPOCHS == 0:
-            save_image(real_images, os.path.join(cfg.GENERATED_IMAGE_DIR, f"real_images_epoch_{epoch+1}.png"), normalize=True)
-            save_image(fake_images, os.path.join(cfg.GENERATED_IMAGE_DIR, f"generated_images_epoch_{epoch+1}.png"), normalize=True)
-            print(f"Immagini di esempio salvate.")
+            # Salva l'ultimo batch di validazione per un confronto visivo
+            if 'real_images_resized' in locals():
+                save_image(real_images_resized, os.path.join(cfg.GENERATED_IMAGE_DIR, f"real_images_epoch_{epoch+1}.png"), normalize=True)
+                save_image(generated_images, os.path.join(cfg.GENERATED_IMAGE_DIR, f"generated_images_epoch_{epoch+1}.png"), normalize=True)
+                print(f"Immagini di esempio salvate per l'epoca {epoch+1}")
 
         if (epoch + 1) % cfg.CHECKPOINT_SAVE_EPOCHS == 0:
-            torch.save(generator.state_dict(), os.path.join(cfg.CHECKPOINT_DIR, f"generator_epoch_{epoch+1}.pth"))
-            torch.save(discriminator.state_dict(), os.path.join(cfg.CHECKPOINT_DIR, f"discriminator_epoch_{epoch+1}.pth"))
-            print(f"Checkpoint salvati.")
+            checkpoint_path = os.path.join(cfg.CHECKPOINT_DIR, f"generator_epoch_{epoch+1}.pth")
+            # Salva solo il generatore, dato che non c'è il discriminatore
+            torch.save(model.state_dict(), checkpoint_path)
+            print(f"Checkpoint salvato: {checkpoint_path}")
 
     print("Addestramento completato.")
     return history
 
 if __name__ == '__main__':
+    # Esegue il training se lo script viene lanciato direttamente
+    # L'orchestratore chiamerà questa funzione e userà il suo output
     train(config)
