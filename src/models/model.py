@@ -3,7 +3,7 @@
 import torch.nn as nn
 from .encoder import TextEncoder
 from .decoder import UNetDecoder
-from .discriminator import Discriminator # <-- NUOVO IMPORT
+from .discriminator import Discriminator
 
 class PikaPikaGen(nn.Module):
     """
@@ -19,7 +19,7 @@ class PikaPikaGen(nn.Module):
         )
         self.decoder = UNetDecoder(config)
         
-        # Aggiungiamo il Discriminatore
+        # Il Discriminatore
         self.discriminator = Discriminator(in_channels=config.OUTPUT_CHANNELS)
 
     def forward_generator(self, input_ids, attention_mask):
