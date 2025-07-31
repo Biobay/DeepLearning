@@ -1,83 +1,83 @@
 # src/models/decoder.py
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+import torch, torch.nn as nn, torch.nn.functional as F
+from .attention import CrossAttentionBlock
 
-class AdaIN(nn.Module):
-    def __init__(self, style_dim, num_channels):
+class UNetDownBlock(nn.Module):
+    def __init__(self, in_c, out_c, norm=True):
         super().__init__()
-        self.norm = nn.InstanceNorm2d(num_channels)
-        self.style_transform = nn.Linear(style_dim, num_channels * 2)
+        layers = [nn.Conv2d(in_c, out_c, 4, 2, 1, bias=not norm)]
+        if norm: layers.append(nn.BatchNorm2d(out_c))
+        layers.append(nn.LeakyReLU(0.2))
+        self.model = nn.Sequential(*layers)
+    def forward(self, x): return self.model(x)
 
-    def forward(self, image_features, style_vector):
-        normalized_features = self.norm(image_features)
-        style = self.style_transform(style_vector).unsqueeze(-1).unsqueeze(-1)
-        gamma, beta = style.chunk(2, dim=1)
-        return gamma * normalized_features + beta
-
-class SynthesisBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, style_dim):
+class UNetUpBlock(nn.Module):
+    def __init__(self, in_c, out_c):
         super().__init__()
-        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
-        self.adain1 = AdaIN(style_dim, out_channels)
-        self.relu1 = nn.LeakyReLU(0.2)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
-        self.adain2 = AdaIN(style_dim, out_channels)
-        self.relu2 = nn.LeakyReLU(0.2)
+        self.model = nn.Sequential(
+            nn.ConvTranspose2d(in_c, out_c, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(out_c), nn.ReLU(True))
+    def forward(self, x, skip):
+        x = torch.cat([x, skip], dim=1)
+        return self.model(x)
 
-    def forward(self, x, style_vector):
-        x = self.up(x); x = self.conv1(x); x = self.adain1(x, style_vector)
-        x = self.relu1(x); x = self.conv2(x); x = self.adain2(x, style_vector)
-        return self.relu2(x)
-
-class StyleBasedGenerator(nn.Module):
+class UNetDecoder(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        style_dim = cfg.STYLE_DIM
-        
-        mapping_layers = [nn.Linear(cfg.LATENT_DIM, style_dim), nn.LeakyReLU(0.2)]
-        for _ in range(cfg.MAPPING_NETWORK_DEPTH - 1):
-            mapping_layers.extend([nn.Linear(style_dim, style_dim), nn.LeakyReLU(0.2)])
-        self.mapping_network = nn.Sequential(*mapping_layers)
+        c = cfg.UNET_CHANNELS
 
-        self.initial_constant = nn.Parameter(torch.randn(1, 512, 4, 4))
+        # Discesa
+        self.d1 = UNetDownBlock(cfg.OUTPUT_CHANNELS, c[0], norm=False) # 128
+        self.d2 = UNetDownBlock(c[0], c[1])           # 64
+        self.d3 = UNetDownBlock(c[1], c[2])           # 32
+        self.d4 = UNetDownBlock(c[2], c[3])           # 16
         
-        self.initial_adain1 = AdaIN(style_dim, 512)
-        self.initial_adain2 = AdaIN(style_dim, 512)
-        self.initial_conv = nn.Conv2d(512, 512, kernel_size=3, padding=1)
+        # Bottleneck
+        self.bottleneck = UNetDownBlock(c[3], c[3]) # 8
+
+        # Risalita
+        self.u1 = UNetUpBlock(c[3], c[3])
+        self.u2 = UNetUpBlock(c[3] * 2, c[2])
+        self.u3 = UNetUpBlock(c[2] * 2, c[1])
+        self.u4 = UNetUpBlock(c[1] * 2, c[0])
         
-        self.synth_block1 = SynthesisBlock(512, 512, style_dim) 
-        self.synth_block2 = SynthesisBlock(512, 512, style_dim) 
-        self.synth_block3 = SynthesisBlock(512, 256, style_dim) 
-        self.synth_block4 = SynthesisBlock(256, 128, style_dim) 
-        self.synth_block5 = SynthesisBlock(128, 64, style_dim)  
-        self.synth_block6 = SynthesisBlock(64, 32, style_dim)   
-        
-        self.to_rgb = nn.Conv2d(32, cfg.OUTPUT_CHANNELS, kernel_size=1)
+        # Attention Blocks
+        self.attn1 = CrossAttentionBlock(c[3], cfg.CONTEXT_DIM, cfg.NUM_HEADS)
+        self.attn2 = CrossAttentionBlock(c[2], cfg.CONTEXT_DIM, cfg.NUM_HEADS)
+
+        # Output
+        self.final_up = nn.ConvTranspose2d(c[0] * 2, cfg.OUTPUT_CHANNELS, 4, 2, 1)
         self.final_act = nn.Tanh()
 
     def forward(self, text_features):
-        batch_size = text_features.size(0)
+        B, C, H, W = text_features.shape[0], self.cfg.OUTPUT_CHANNELS, self.cfg.MODEL_INTERNAL_SIZE, self.cfg.MODEL_INTERNAL_SIZE
+        x = torch.randn(B, C, H, W, device=text_features.device)
         
-        # --- MODIFICA CHIAVE: USA IL TOKEN [CLS] ---
-        latent_vector = text_features[:, 0, :]
-        style_vector = self.mapping_network(latent_vector)
+        def apply_attention(x, attn_block, context):
+            B, C_img, H_img, W_img = x.shape
+            img_feat = x.view(B, C_img, H_img * W_img).permute(0, 2, 1)
+            attn_feat = attn_block(img_feat, context)
+            return attn_feat.permute(0, 2, 1).view(B, C_img, H_img, W_img)
         
-        x = self.initial_constant.repeat(batch_size, 1, 1, 1)
-        x = self.initial_adain1(x, style_vector)
-        x = self.initial_conv(x)
-        x = self.initial_adain2(x, style_vector)
-        
-        x = self.synth_block1(x, style_vector)
-        x = self.synth_block2(x, style_vector)
-        x = self.synth_block3(x, style_vector)
-        x = self.synth_block4(x, style_vector)
-        x = self.synth_block5(x, style_vector)
-        x = self.synth_block6(x, style_vector)
+        # Discesa
+        d1 = self.d1(x)
+        d2 = self.d2(d1)
+        d3 = self.d3(d2)
+        d4 = self.d4(d3)
+        b = self.bottleneck(d4)
 
-        x = self.to_rgb(x)
-        final_image = F.interpolate(x, size=self.cfg.IMAGE_OUTPUT_SIZE, mode='bilinear', align_corners=False)
+        # Risalita con attention
+        u1 = self.u1(b, d4)
+        u1 = apply_attention(u1, self.attn1, text_features)
+        
+        u2 = self.u2(u1, d3)
+        u2 = apply_attention(u2, self.attn2, text_features)
+        
+        u3 = self.u3(u2, d2)
+        u4 = self.u4(u3, d1)
+
+        out = self.final_up(u4)
+        final_image = F.interpolate(out, size=self.cfg.IMAGE_OUTPUT_SIZE, mode='bilinear', align_corners=False)
         
         return self.final_act(final_image), None
