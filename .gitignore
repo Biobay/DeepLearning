@@ -1,3 +1,30 @@
+# Ambiente virtuale Python
+.venv/
+venv/
+ENV/
+env/
+
+# File temporanei e di sistema
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.swp
+*.swo
+*.DS_Store
+.ipynb_checkpoints/
+.idea/
+.vscode/
+*.egg-info/
+*.log
+*.tmp
+*.bak
+
+# Output comuni di deep learning
+results/
+checkpoints/
+*.pth
+*.pt
 # Python
 __pycache__/
 *.py[cod]
