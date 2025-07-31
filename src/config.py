@@ -13,6 +13,7 @@ MODEL_INTERNAL_SIZE = 256
 
 BATCH_SIZE = 4   # Le GAN usano più memoria, manteniamo un batch size basso
 NUM_WORKERS = 0
+SCHEDULER_PATIENCE = 5 
 
 # --- Parametri del Modello ---
 ENCODER_MODEL_NAME = "prajjwal1/bert-mini"
