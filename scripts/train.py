@@ -40,8 +40,10 @@ def train(cfg):
 
 
     # Dataloader
+    # In scripts/train.py
+
     train_loader, val_loader, _ = create_dataloaders(
-        csv_path=os.path.join(cfg.DATA_DIR, cfg.CSV_NAME),
+        csv_path=cfg.CSV_PATH, # <-- CORREZIONE: Usa direttamente il path completo
         img_dir=cfg.IMAGE_DIR,
         splits_dir=cfg.SPLITS_DIR,
         config=cfg
