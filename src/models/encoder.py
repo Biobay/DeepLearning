@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from transformers import AutoModel
+from transformers import AutoModel, AutoTokenizer
 
 class TextEncoder(nn.Module):
     """
@@ -14,7 +14,9 @@ class TextEncoder(nn.Module):
             fine_tune (bool): Se fare il fine-tuning dei pesi del modello.
         """
         super().__init__()
+        self.model_name = model_name
         self.transformer = AutoModel.from_pretrained(model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         
         if not fine_tune:
             for param in self.transformer.parameters():
@@ -50,3 +52,36 @@ class TextEncoder(nn.Module):
         # Restituiamo sia l'embedding [CLS] (per il contesto globale) 
         # che gli hidden states completi (per l'attention)
         return cls_embedding, last_hidden_state
+
+    def encode_text(self, text_list, max_length=128):
+        """
+        Metodo di convenienza per codificare una lista di testi.
+        
+        Args:
+            text_list (List[str]): Lista di stringhe da codificare
+            max_length (int): Lunghezza massima della sequenza
+            
+        Returns:
+            torch.Tensor: Embedding CLS per ogni testo. Dim: (batch_size, encoder_dim)
+        """
+        # Tokenizza il testo
+        encoded = self.tokenizer(
+            text_list,
+            padding=True,
+            truncation=True,
+            max_length=max_length,
+            return_tensors='pt'
+        )
+        
+        # Sposta su device del modello se necessario
+        if next(self.parameters()).is_cuda:
+            encoded = {k: v.cuda() for k, v in encoded.items()}
+        
+        # Codifica
+        with torch.no_grad() if not self.training else torch.enable_grad():
+            cls_embedding, _ = self.forward(
+                encoded['input_ids'], 
+                encoded['attention_mask']
+            )
+        
+        return cls_embedding
