@@ -1,39 +1,46 @@
+# src/models/attention.py
+
 import torch
 import torch.nn as nn
 
-class MultiHeadCrossAttention(nn.Module):
+class CrossAttentionBlock(nn.Module):
     """
-    Modulo di Cross-Attention basato su Multi-Head Attention di PyTorch.
-    Permette a una sequenza di query (dal decoder) di "prestare attenzione"
-    a una sequenza di key/value (dal testo codificato).
+    Blocco di Cross-Attention AVANZATO, ispirato ai Transformer.
+    Permette alle feature di un'immagine (query) di "prestare attenzione"
+    alle feature del testo (context/key/value) per arricchirsi semanticamente.
     """
-    def __init__(self, embed_dim, num_heads):
+    def __init__(self, query_dim, context_dim, num_heads, inner_dim=None):
         super().__init__()
+        inner_dim = inner_dim if inner_dim is not None else query_dim
+        
         self.attention = nn.MultiheadAttention(
-            embed_dim=embed_dim, 
+            embed_dim=query_dim, 
             num_heads=num_heads, 
-            batch_first=True  # Si aspetta input come (batch, seq, feature)
+            kdim=context_dim,
+            vdim=context_dim,
+            batch_first=True
+        )
+        self.norm1 = nn.LayerNorm(query_dim)
+        self.norm2 = nn.LayerNorm(query_dim)
+        
+        self.ffn = nn.Sequential(
+            nn.Linear(query_dim, inner_dim * 4),
+            nn.GELU(),
+            nn.Linear(inner_dim * 4, query_dim)
         )
 
-    def forward(self, query, key_value):
+    def forward(self, query, context):
         """
         Args:
-            query (torch.Tensor): Lo stato del decoder o una rappresentazione aggregata del testo.
-                                  Dim: (batch_size, 1, embed_dim)
-            key_value (torch.Tensor): L'output dell'encoder di testo.
-                                      Dim: (batch_size, seq_len, embed_dim)
-
-        Returns:
-            Tuple[torch.Tensor, torch.Tensor]: L'output dell'attenzione (vettore di contesto)
-                                               e i pesi di attenzione.
+            query (torch.Tensor): Feature dell'immagine nel formato (B, Sequence, Features).
+            context (torch.Tensor): Feature del testo (output di BERT). Dim: (B, SeqLen, C).
         """
-        # Per la cross-attention, la query, la chiave e il valore sono diversi.
-        # Query: stato del decoder / rappresentazione aggregata
-        # Key & Value: output dell'encoder di testo
-        attn_output, attn_weights = self.attention(
-            query=query, 
-            key=key_value, 
-            value=key_value, 
-            need_weights=True
-        )
-        return attn_output, attn_weights
+        residual = query
+        attn_output, _ = self.attention(query=query, key=context, value=context)
+        query = self.norm1(residual + attn_output)
+        
+        residual = query
+        ffn_output = self.ffn(query)
+        query = self.norm2(residual + ffn_output)
+        
+        return query

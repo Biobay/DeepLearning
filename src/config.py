@@ -1,51 +1,43 @@
 # src/config.py
-import torch, os
 
-# Percorsi Assoluti
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-DATA_DIR = os.path.join(BASE_DIR, "data")
-IMAGE_DIR = os.path.join(BASE_DIR, "small_images")
-CSV_PATH = os.path.join(DATA_DIR, "pokemon.csv")
-SPLITS_DIR = os.path.join(DATA_DIR, "splits")
+import torch
 
-# Dataset
-BATCH_SIZE = 16 # Possiamo tornare a 16 per Stage-I
+# --- Parametri del Dataset e dei Dataloader ---
+DATA_DIR = "data"
+IMAGE_DIR = "small_images"
+CSV_NAME = "pokemon.csv"
+SPLITS_DIR = "data/splits"
+
+IMAGE_OUTPUT_SIZE = 215
+MODEL_INTERNAL_SIZE = 256
+
+BATCH_SIZE = 4   # Manteniamo un batch size basso
 NUM_WORKERS = 0
-MAX_SEQ_LEN = 128
 
-# Encoder
+# --- Parametri del Modello ---
 ENCODER_MODEL_NAME = "prajjwal1/bert-mini"
+ENCODER_DIM = 256
 FINE_TUNE_ENCODER = True
-TEXT_EMBEDDING_DIM = 256
-NUM_HEADS = 4
 
-# Stage-I
-Z_DIM = 100
-DECODER_BASE_CHANNELS = 64
-DISCRIMINATOR_BASE_CHANNELS = 64
-STAGE1_IMAGE_SIZE = 64
+# Decoder U-Net con Cross-Attention
+NUM_HEADS = 8 # La Cross-Attention beneficia di più teste
+CONTEXT_DIM = ENCODER_DIM
+UNET_CHANNELS = (64, 128, 256, 512)
+OUTPUT_CHANNELS = 3
+DROPOUT_RATE = 0.5 # Dropout nei blocchi UpBlock
 
-# Stage-II
-STAGE2_IMAGE_SIZE = 215
-
-# Training
+# --- Parametri di Addestramento (GAN) ---
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+EPOCHS = 200
 
-# Stage-I Training (Parametri per la stabilità)
-EPOCHS = 150 # Diamo più tempo per convergere
-LEARNING_RATE_G = 2e-4
-LEARNING_RATE_D = 1e-4 # Leggermente più basso per il Discriminatore
-LAMBDA_L1 = 50       # RIDOTTO per dare più peso alla loss avversaria
+LEARNING_RATE = 2e-4
+BETA1 = 0.5
+LAMBDA_L1 = 100
+REAL_LABEL_SMOOTHING = 0.9
 
-# Stage-II Training
-EPOCHS_S2 = 150
-LEARNING_RATE_S2 = 2e-4
-LAMBDA_L1_S2 = 20 # Ancora più basso per Stage-II
-
-# Logging e Checkpoints
-RESULTS_DIR = os.path.join(BASE_DIR, "results_multiscale_gan")
-CHECKPOINT_DIR = os.path.join(RESULTS_DIR, "checkpoints")
-GENERATED_IMAGE_DIR = os.path.join(RESULTS_DIR, "generated_images")
-LOG_DIR = os.path.join(RESULTS_DIR, "logs")
+# --- Parametri per il Logging e i Checkpoint ---
+RESULTS_DIR = "results_cross_attention_gan"
+CHECKPOINT_DIR = f"{RESULTS_DIR}/checkpoints"
+GENERATED_IMAGE_DIR = f"{RESULTS_DIR}/generated_images"
 SAVE_IMAGE_EPOCHS = 10
 CHECKPOINT_SAVE_EPOCHS = 10
