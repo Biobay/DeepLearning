@@ -1,208 +1,119 @@
-import torch
-import torch.nn as nn
-from src.models.attention import MultiHeadCrossAttention
+# src/models/decoder.py
+import torch, torch.nn as nn
+from .attention import MultiHeadCrossAttention
 
+# --- GENERATORE STAGE-I (INVARIATO) ---
 class GeneratorS1(nn.Module):
-    """
-    Generatore dello Stage-I, basato su un'architettura CNN (DCGAN-like).
-    Crea un'immagine a bassa risoluzione (64x64) partendo da:
-    1. Un embedding testuale (processato tramite attention).
-    2. Un vettore di rumore latente z.
-    """
     def __init__(self, config):
         super().__init__()
-        
+        # ... (Il codice di GeneratorS1 rimane esattamente lo stesso di prima)
         self.text_embed_dim = config.TEXT_EMBEDDING_DIM
         self.z_dim = config.Z_DIM
         self.base_channels = config.DECODER_BASE_CHANNELS
-
-        # La proiezione iniziale ora accetta sia l'embedding del testo che il rumore z
         self.init_projection = nn.Sequential(
             nn.Linear(self.text_embed_dim + self.z_dim, self.base_channels * 8 * 4 * 4),
-            nn.BatchNorm1d(self.base_channels * 8 * 4 * 4), # Aggiunta per stabilità
-            nn.ReLU(True)
-        )
-
-        # Modulo di Attention per condizionare il testo
-        self.attention = MultiHeadCrossAttention(
-            embed_dim=self.text_embed_dim, 
-            num_heads=config.NUM_HEADS
-        )
-        
-        # Rete generativa CNN, ora più "larga" grazie a base_channels
+            nn.BatchNorm1d(self.base_channels * 8 * 4 * 4), nn.ReLU(True))
+        self.attention = MultiHeadCrossAttention(embed_dim=self.text_embed_dim, num_heads=config.NUM_HEADS)
         self.main = nn.Sequential(
-            # Input: (base_channels * 8) x 4 x 4
             nn.ConvTranspose2d(self.base_channels * 8, self.base_channels * 4, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(self.base_channels * 4),
-            nn.ReLU(True),
-            # State: (base_channels * 4) x 8 x 8
+            nn.BatchNorm2d(self.base_channels * 4), nn.ReLU(True),
             nn.ConvTranspose2d(self.base_channels * 4, self.base_channels * 2, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(self.base_channels * 2),
-            nn.ReLU(True),
-            # State: (base_channels * 2) x 16 x 16
+            nn.BatchNorm2d(self.base_channels * 2), nn.ReLU(True),
             nn.ConvTranspose2d(self.base_channels * 2, self.base_channels, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(self.base_channels),
-            nn.ReLU(True),
-            # State: (base_channels) x 32 x 32
+            nn.BatchNorm2d(self.base_channels), nn.ReLU(True),
             nn.ConvTranspose2d(self.base_channels, 3, 4, 2, 1, bias=False),
-            # Output: 3 (RGB) x 64 x 64
-            nn.Tanh() # Normalizza l'output tra -1 e 1
-        )
-
+            nn.Tanh())
     def forward(self, cls_embedding, hidden_states, z_noise):
-        """
-        Args:
-            cls_embedding (torch.Tensor): Vettore [CLS] di BERT. Dim: (batch, embed_dim)
-            hidden_states (torch.Tensor): Output dell'ultimo layer di BERT. Dim: (batch, seq_len, embed_dim)
-            z_noise (torch.Tensor): Vettore di rumore. Dim: (batch, z_dim)
-
-        Returns:
-            torch.Tensor: Immagine generata. Dim: (batch, 3, 64, 64)
-            torch.Tensor: Pesi dell'attenzione. Dim: (batch, num_heads, 1, seq_len)
-        """
-        batch_size = hidden_states.size(0)
-        
-        # 1. Applica l'attenzione per ottenere un vettore di contesto dal testo
-        #    La query è il [CLS] embedding, Key e Value sono gli hidden states
-        attn_output, attn_weights = self.attention(
-            query=cls_embedding.unsqueeze(1), # Aggiunge la dimensione per la sequenza (len=1)
-            key_value=hidden_states
-        )
-        conditioned_vector = attn_output.squeeze(1) # Rimuove la dimensione della sequenza
-
-        # 2. Concatena il contesto testuale e il rumore
+        # ... (Il forward di GeneratorS1 rimane esattamente lo stesso di prima)
+        attn_output, attn_weights = self.attention(query=cls_embedding.unsqueeze(1), key_value=hidden_states)
+        conditioned_vector = attn_output.squeeze(1)
         combined_input = torch.cat([conditioned_vector, z_noise], dim=1)
-        
-        # 3. Proietta l'input combinato nella dimensione iniziale della CNN
         x = self.init_projection(combined_input)
-        x = x.view(batch_size, -1, 4, 4) # Reshape a (batch, base_channels*8, 4, 4)
-        
-        # 4. Passa attraverso la rete generativa per creare l'immagine
-        generated_image = self.main(x)
-        
-        return generated_image, attn_weights
+        x = x.view(x.size(0), -1, 4, 4)
+        return self.main(x), attn_weights
 
+# --- BLOCCHI COSTITUTIVI PER LA U-NET ---
+class UNetDown(nn.Module):
+    def __init__(self, in_c, out_c, norm=True):
+        super().__init__()
+        layers = [nn.Conv2d(in_c, out_c, 4, 2, 1, bias=False)]
+        if norm: layers.append(nn.InstanceNorm2d(out_c))
+        layers.append(nn.LeakyReLU(0.2))
+        self.model = nn.Sequential(*layers)
+    def forward(self, x): return self.model(x)
 
+class UNetUp(nn.Module):
+    def __init__(self, in_c, out_c, dropout=0.0):
+        super().__init__()
+        layers = [
+            nn.ConvTranspose2d(in_c, out_c, 4, 2, 1, bias=False),
+            nn.InstanceNorm2d(out_c), nn.ReLU(inplace=True)]
+        if dropout: layers.append(nn.Dropout(dropout))
+        self.model = nn.Sequential(*layers)
+    def forward(self, x, skip):
+        x = self.model(x)
+        return torch.cat([x, skip], 1)
+
+# =============================================================================
+# ## GENERATORE STAGE-II (NUOVA ARCHITETTURA U-NET) ##
+# =============================================================================
 class GeneratorS2(nn.Module):
-    """Generatore Stage-II: raffina immagini 64x64 a 256x256"""
-    
     def __init__(self, config):
-        super(GeneratorS2, self).__init__()
+        super().__init__()
         self.config = config
-        self.text_dim = config.TEXT_EMBEDDING_DIM
-        self.base_channels = config.DECODER_BASE_CHANNELS
+        ngf = config.DECODER_BASE_CHANNELS # Usiamo la stessa base di canali
+
+        # U-Net Encoder (percorso di discesa)
+        self.down1 = UNetDown(3, ngf, norm=False) # 64 -> 32
+        self.down2 = UNetDown(ngf, ngf * 2)        # 32 -> 16
+        self.down3 = UNetDown(ngf * 2, ngf * 4)      # 16 -> 8
+        self.down4 = UNetDown(ngf * 4, ngf * 8)      # 8 -> 4
         
-        # Encoder per le immagini 64x64 del Stage-I
-        self.img_encoder = nn.Sequential(
-            # Input: 3 x 64 x 64
-            nn.Conv2d(3, self.base_channels//2, 4, 2, 1, bias=False),
-            nn.LeakyReLU(0.2, inplace=True),
-            # 32 x 32 x 32
-            nn.Conv2d(self.base_channels//2, self.base_channels, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(self.base_channels),
-            nn.LeakyReLU(0.2, inplace=True),
-            # 64 x 16 x 16
-            nn.Conv2d(self.base_channels, self.base_channels*2, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(self.base_channels*2),
-            nn.LeakyReLU(0.2, inplace=True),
-            # 128 x 8 x 8
-            nn.Conv2d(self.base_channels*2, self.base_channels*4, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(self.base_channels*4),
-            nn.LeakyReLU(0.2, inplace=True),
-            # 256 x 4 x 4
-        )
+        self.bottleneck = UNetDown(ngf * 8, ngf * 8, normalize=False) # 4 -> 2
+
+        # Proiezione del testo nel bottleneck
+        self.text_projection = nn.Linear(config.TEXT_EMBEDDING_DIM, ngf * 8 * 2 * 2)
+
+        # U-Net Decoder (percorso di risalita)
+        self.up1 = UNetUp(ngf * 8, ngf * 8, dropout=0.5)
+        self.up2 = UNetUp(ngf * 8 * 2, ngf * 4)
+        self.up3 = UNetUp(ngf * 4 * 2, ngf * 2)
+        self.up4 = UNetUp(ngf * 2 * 2, ngf)
         
-        # Proiezione del testo condizionato
-        self.text_projection = nn.Sequential(
-            nn.Linear(self.text_dim, self.base_channels*4),
-            nn.BatchNorm1d(self.base_channels*4),
-            nn.ReLU(True)
-        )
-        
-        # Decoder principale per upsampling a 256x256 poi ridimensionamento
-        self.main = nn.Sequential(
-            # Input: (256 + 256) x 4 x 4 = 512 x 4 x 4
-            nn.ConvTranspose2d(self.base_channels*8, self.base_channels*4, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(self.base_channels*4),
-            nn.ReLU(True),
-            # 256 x 8 x 8
-            nn.ConvTranspose2d(self.base_channels*4, self.base_channels*2, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(self.base_channels*2),
-            nn.ReLU(True),
-            # 128 x 16 x 16
-            nn.ConvTranspose2d(self.base_channels*2, self.base_channels, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(self.base_channels),
-            nn.ReLU(True),
-            # 64 x 32 x 32
-            nn.ConvTranspose2d(self.base_channels, self.base_channels//2, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(self.base_channels//2),
-            nn.ReLU(True),
-            # 32 x 64 x 64
-            nn.ConvTranspose2d(self.base_channels//2, self.base_channels//4, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(self.base_channels//4),
-            nn.ReLU(True),
-            # 16 x 128 x 128
-            nn.ConvTranspose2d(self.base_channels//4, 3, 4, 2, 1, bias=False),
+        # Layer finale
+        self.final_up = nn.Sequential(
+            nn.ReLU(),
+            nn.ConvTranspose2d(ngf * 2, 3, 4, 2, 1),
             nn.Tanh()
-            # 3 x 256 x 256
+        )
+
+    def forward(self, stage1_img, text_embedding, _): # Ignoriamo 'stage1_mu'
+        # Percorso di discesa (encoding dell'immagine 64x64)
+        d1 = self.down1(stage1_img)
+        d2 = self.down2(d1)
+        d3 = self.down3(d2)
+        d4 = self.down4(d3)
+        
+        # Bottleneck e iniezione del testo
+        b = self.bottleneck(d4)
+        text_features = self.text_projection(text_embedding).view(-1, self.config.DECODER_BASE_CHANNELS * 8, 2, 2)
+        b = b + text_features # Fusione additiva
+        
+        # Percorso di risalita con skip connections
+        u1 = self.up1(b, d4)
+        u2 = self.up2(u1, d3)
+        u3 = self.up3(u2, d2)
+        u4 = self.up4(u3, d1)
+        
+        out_128 = self.final_up(u4)
+        
+        # Upsampling finale alla dimensione richiesta
+        final_img = nn.functional.interpolate(
+            out_128, 
+            size=(self.config.STAGE2_IMAGE_SIZE, self.config.STAGE2_IMAGE_SIZE),
+            mode='bilinear',
+            align_corners=False
         )
         
-        # Ridimensionamento adattivo per target size
-        self.target_size = config.STAGE2_IMAGE_SIZE
-        if self.target_size != 256:
-            self.resize = nn.AdaptiveAvgPool2d((self.target_size, self.target_size))
-        else:
-            self.resize = None
-        
-        self._initialize_weights()
-    
-    def _initialize_weights(self):
-        """Inizializza i pesi della rete."""
-        for m in self.modules():
-            if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
-                nn.init.normal_(m.weight.data, 0.0, 0.02)
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.normal_(m.weight.data, 1.0, 0.02)
-                nn.init.constant_(m.bias.data, 0)
-            elif isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight.data, 0.0, 0.02)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias.data, 0)
-    
-    def forward(self, stage1_img, text_embedding, stage1_mu):
-        """
-        Forward pass del GeneratorS2.
-        
-        Args:
-            stage1_img: Immagini 64x64 generate dal Stage-I [B, 3, 64, 64]
-            text_embedding: Text embedding [B, text_dim]
-            stage1_mu: Parametri mu del Stage-I (per condizionamento)
-            
-        Returns:
-            stage2_img: Immagini raffinate 256x256 [B, 3, 256, 256]
-            mu: Parametri di condizionamento per Stage-II
-        """
-        batch_size = stage1_img.size(0)
-        
-        # 1. Codifica l'immagine Stage-I
-        img_features = self.img_encoder(stage1_img)  # [B, 256, 4, 4]
-        
-        # 2. Proietta il text embedding
-        text_features = self.text_projection(text_embedding)  # [B, 256]
-        text_features = text_features.view(batch_size, -1, 1, 1)  # [B, 256, 1, 1]
-        text_features = text_features.expand(-1, -1, 4, 4)  # [B, 256, 4, 4]
-        
-        # 3. Concatena features immagine e testo
-        combined_features = torch.cat([img_features, text_features], dim=1)  # [B, 512, 4, 4]
-        
-        # 4. Genera immagine iniziale (256x256)
-        stage2_img = self.main(combined_features)
-        
-        # 5. Ridimensiona alla dimensione target se necessario
-        if self.resize is not None:
-            stage2_img = self.resize(stage2_img)
-        
-        # 6. Calcola mu per Stage-II (per consistenza con l'architettura)
-        mu = stage1_mu  # Riusa i parametri del Stage-I
-        
-        return stage2_img, mu
+        # Ritorna None per mu, per coerenza con la firma originale
+        return final_img, None
