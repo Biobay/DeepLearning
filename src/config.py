@@ -6,9 +6,12 @@ import torch
 DATA_DIR = "data"
 IMAGE_DIR = "small_images"
 CSV_NAME = "pokemon.csv"
+CSV_PATH = f"{DATA_DIR}/{CSV_NAME}"  # Percorso completo al file CSV
 SPLITS_DIR = "data/splits"
 
 IMAGE_OUTPUT_SIZE = 215
+IMAGE_SIZE = IMAGE_OUTPUT_SIZE  # Alias per compatibilità con i notebook
+STAGE1_IMAGE_SIZE = 64  # Dimensione delle immagini per lo Stage-I del StackGAN
 MODEL_INTERNAL_SIZE = 256
 
 BATCH_SIZE = 4   # Manteniamo un batch size basso

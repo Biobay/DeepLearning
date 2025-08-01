@@ -49,20 +49,36 @@ class PokemonDataset(Dataset):
         return {"input_ids": inputs['input_ids'].squeeze(0), "attention_mask": inputs['attention_mask'].squeeze(0), "image": image, "description": desc}
 
 # --- FUNZIONE create_dataloaders MODIFICATA ---
-def create_dataloaders(csv_path, img_dir, splits_dir, config, img_size=None):
+def create_dataloaders(csv_path, img_dir, splits_dir, config, img_size=None, use_augmentation=True):
     """
     Crea i DataLoader, applicando la Data Augmentation solo al training set.
+    
+    Args:
+        csv_path: Percorso al file CSV
+        img_dir: Directory delle immagini
+        splits_dir: Directory degli split
+        config: Oggetto di configurazione
+        img_size: Dimensione target delle immagini (opzionale)
+        use_augmentation: Se True, applica data augmentation al training set
     """
     target_size = img_size if img_size is not None else config.STAGE1_IMAGE_SIZE
     
     # --- PIPELINE DI TRASFORMAZIONE CON AUGMENTATION ---
-    train_transform = T.Compose([
-        T.Resize((target_size, target_size)),
-        T.RandomHorizontalFlip(p=0.5), # Ribalta il 50% delle immagini
-        T.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1), # Varia i colori
-        T.ToTensor(),
-        T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-    ])
+    if use_augmentation:
+        train_transform = T.Compose([
+            T.Resize((target_size, target_size)),
+            T.RandomHorizontalFlip(p=0.5), # Ribalta il 50% delle immagini
+            T.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1), # Varia i colori
+            T.ToTensor(),
+            T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+        ])
+    else:
+        # Trasformazioni base senza augmentation per il training
+        train_transform = T.Compose([
+            T.Resize((target_size, target_size)),
+            T.ToTensor(),
+            T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+        ])
     
     # --- PIPELINE DI TRASFORMAZIONE SENZA AUGMENTATION ---
     val_test_transform = T.Compose([
