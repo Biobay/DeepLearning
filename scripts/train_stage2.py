@@ -66,17 +66,17 @@ def train_stage2(cfg):
     netD_s2 = DiscriminatorS2(config=cfg).to(device)
     print("Generatore Stage-II (U-Net) e Discriminatore Stage-II creati.")
     
-    # Ottimizzatori con learning rates differenziati
+    # Ottimizzatori
     params_g_s2 = chain(text_encoder.parameters(), netG_s2.parameters())
+    # NOTA: Qui potresti usare LEARNING_RATE_GEN_S2 e LEARNING_RATE_DISC_S2 se li definisci nel config
     optimizerG_s2 = optim.Adam(params_g_s2, lr=cfg.LEARNING_RATE_S2, betas=(0.5, 0.999))
-    # NOTA: Se vuoi LR diversi per D, dovrai aggiungerlo al config e usarlo qui
     optimizerD_s2 = optim.Adam(netD_s2.parameters(), lr=cfg.LEARNING_RATE_S2, betas=(0.5, 0.999))
     
     # Loss
-    adversarial_loss = nn.BCEWithlogitsLoss()
+    adversarial_loss = nn.BCEWithLogitsLoss()
     l1_loss = nn.L1Loss()
     
-    # Ciclo di addestramento Stage-II
+    # Ciclo di addestramento
     print(f"Inizio dell'addestramento GAN Stage-II con Generatore U-Net...")
     for epoch in range(cfg.EPOCHS_S2):
         text_encoder.train()
@@ -104,11 +104,11 @@ def train_stage2(cfg):
                 stage1_images, _ = netG_s1(cls_embedding, hidden_states, noise)
             
             # Loss su immagini reali
-            labels_real = torch.full((batch_size,), 1.0, dtype=torch.float, device=device) # Label smoothing può essere aggiunto qui
+            labels_real = torch.full((batch_size,), 1.0, dtype=torch.float, device=device)
             output_real = netD_s2(real_images_s2, cls_embedding.detach())
             loss_d_real = adversarial_loss(output_real, labels_real)
             
-            # Genera immagini S2 con la U-Net
+            # Genera immagini S2 con la U-Net (non serve più mu)
             fake_images_s2, _ = netG_s2(stage1_images.detach(), cls_embedding.detach())
             
             # Loss su immagini false
@@ -126,7 +126,6 @@ def train_stage2(cfg):
             
             cls_embedding, _ = text_encoder(input_ids, attention_mask)
             
-            # La U-Net non usa stage1_mu
             fake_images_s2, _ = netG_s2(stage1_images, cls_embedding)
             
             output_g = netD_s2(fake_images_s2, cls_embedding)
@@ -153,7 +152,6 @@ def train_stage2(cfg):
             with torch.no_grad():
                 val_batch = next(iter(val_loader), None)
                 if val_batch:
-                    # Logica per generare e salvare un'immagine di esempio
                     input_ids = val_batch['input_ids'].to(device)
                     attention_mask = val_batch['attention_mask'].to(device)
                     noise = torch.randn(input_ids.size(0), cfg.Z_DIM, device=device)
