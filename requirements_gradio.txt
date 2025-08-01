@@ -1,0 +1,20 @@
+# requirements_gradio.txt
+# Dipendenze per la demo Gradio del generatore di Pokémon
+
+# Framework per l'interfaccia web interattiva
+gradio>=4.0.0
+
+# Machine Learning e Computer Vision (già incluse nel progetto principale)
+torch>=1.9.0
+torchvision>=0.10.0
+transformers>=4.20.0
+numpy>=1.21.0
+Pillow>=8.3.0
+
+# Utilità per l'interfaccia
+matplotlib>=3.5.0
+tqdm>=4.62.0
+
+# Opzionali per migliorare l'esperienza
+opencv-python>=4.5.0
+gradio[authentication]  # Per aggiungere autenticazione se necessario
