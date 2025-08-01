@@ -100,3 +100,77 @@ class UNetDecoder(nn.Module):
         final_image = F.interpolate(out, size=(self.cfg.IMAGE_OUTPUT_SIZE, self.cfg.IMAGE_OUTPUT_SIZE), mode='bilinear', align_corners=False)
         
         return self.final_act(final_image), None # Non abbiamo più una singola attention map
+
+# --- Generatore Stage-I ---
+class GeneratorS1(nn.Module):
+    """Generatore Stage-I che produce immagini 64x64 da embedding testuali"""
+    
+    def __init__(self, config):
+        super().__init__()
+        self.cfg = config
+        ngf = 64  # Numero base di feature del generatore
+        
+        # Proiezione dell'embedding testuale (noise + cls_embedding)
+        self.text_projection = nn.Linear(config.TEXT_EMBEDDING_DIM + config.Z_DIM, ngf * 8 * 4 * 4)
+        
+        # Blocchi di upsampling
+        self.up1 = nn.Sequential(
+            nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf * 4),
+            nn.ReLU(True)
+        )
+        
+        self.up2 = nn.Sequential(
+            nn.ConvTranspose2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf * 2),
+            nn.ReLU(True)
+        )
+        
+        self.up3 = nn.Sequential(
+            nn.ConvTranspose2d(ngf * 2, ngf, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf),
+            nn.ReLU(True)
+        )
+        
+        self.up4 = nn.Sequential(
+            nn.ConvTranspose2d(ngf, config.OUTPUT_CHANNELS, 4, 2, 1, bias=False),
+            nn.Tanh()
+        )
+        
+        # Blocco di cross-attention per conditioning testuale
+        self.attention = CrossAttentionBlock(
+            query_dim=ngf * 4, 
+            context_dim=config.TEXT_EMBEDDING_DIM, 
+            num_heads=config.NUM_HEADS
+        )
+        
+    def forward(self, cls_embedding, hidden_states, noise):
+        """
+        Args:
+            cls_embedding: [batch_size, text_embedding_dim]
+            hidden_states: [batch_size, seq_len, text_embedding_dim] 
+            noise: [batch_size, z_dim]
+        """
+        batch_size = cls_embedding.size(0)
+        
+        # Combina noise e cls_embedding
+        combined = torch.cat([noise, cls_embedding], dim=1)
+        
+        # Proietta a feature map 4x4 usando il combined embedding
+        x = self.text_projection(combined)
+        x = x.view(batch_size, -1, 4, 4)
+        
+        # Upsampling progressivo
+        x = self.up1(x)  # 8x8
+        
+        # Applica cross-attention
+        B, C, H, W = x.shape
+        x_flat = x.view(B, C, H * W).permute(0, 2, 1)  # [B, HW, C]
+        x_attended = self.attention(x_flat, hidden_states)
+        x = x_attended.permute(0, 2, 1).view(B, C, H, W)
+        
+        x = self.up2(x)  # 16x16
+        x = self.up3(x)  # 32x32
+        x = self.up4(x)  # 64x64
+        
+        return x, None  # Restituisce immagine e None per compatibilità

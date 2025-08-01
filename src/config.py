@@ -17,6 +17,7 @@ NUM_WORKERS = 0
 # --- Parametri del Modello ---
 ENCODER_MODEL_NAME = "prajjwal1/bert-mini"
 ENCODER_DIM = 256
+TEXT_EMBEDDING_DIM = 256  # Aggiunto per compatibilità
 FINE_TUNE_ENCODER = True
 
 # Decoder U-Net con Cross-Attention
@@ -25,6 +26,9 @@ CONTEXT_DIM = ENCODER_DIM
 UNET_CHANNELS = (64, 128, 256, 512)
 OUTPUT_CHANNELS = 3
 DROPOUT_RATE = 0.5 # Dropout nei blocchi UpBlock
+
+# Parametri GAN
+Z_DIM = 100  # Dimensione del vettore noise
 
 # --- Parametri di Addestramento (GAN) ---
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
