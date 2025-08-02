@@ -2,7 +2,7 @@ import os
 import sys
 import csv # Importa il modulo csv
 
-# Aggiungi la root del progetto al path di Python
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch

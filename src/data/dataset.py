@@ -7,7 +7,7 @@ from torch.utils.data import Dataset, DataLoader, random_split, Subset, default_
 from transformers import BertTokenizer
 from torchvision import transforms
 
-# Funzione collate definita a livello di modulo per essere "picklable"
+
 def collate_fn(batch):
     batch = [b for b in batch if b is not None]
     if not batch:
@@ -58,7 +58,6 @@ class PokemonDataset(Dataset):
             alpha_composite = Image.alpha_composite(background, image).convert('RGB')
             image = self.transform(alpha_composite)
         except FileNotFoundError:
-            # print(f"Attenzione: Immagine non trovata: {img_path}. Verrà saltata.")
             return None 
 
         return {
