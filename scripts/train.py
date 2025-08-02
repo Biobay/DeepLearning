@@ -58,7 +58,7 @@ def train(cfg):
     # I parametri dell'encoder vengono ottimizzati insieme a quelli del generatore
     params_g = chain(text_encoder.parameters(), netG.parameters())
     optimizerG = optim.Adam(params_g, lr=cfg.LEARNING_RATE, betas=(0.5, 0.999))
-    optimizerD = optim.Adam(netD.parameters(), lr=cfg.LEARNING_RATE, betas=(0.5, 0.999))
+    optimizerD = optim.Adam(netD.parameters(), lr=cfg.LEARNING_RATE_D, betas=(0.5, 0.999))
 
     # Loss
     adversarial_loss = nn.BCEWithLogitsLoss()

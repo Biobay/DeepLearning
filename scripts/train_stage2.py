@@ -76,7 +76,7 @@ def train_stage2(cfg):
     # L'encoder viene ottimizzato insieme al generatore Stage-II
     params_g_s2 = chain(text_encoder.parameters(), netG_s2.parameters())
     optimizerG_s2 = optim.Adam(params_g_s2, lr=cfg.LEARNING_RATE_S2, betas=(0.5, 0.999))
-    optimizerD_s2 = optim.Adam(netD_s2.parameters(), lr=cfg.LEARNING_RATE_S2, betas=(0.5, 0.999))
+    optimizerD_s2 = optim.Adam(netD_s2.parameters(), lr=cfg.LEARNING_RATE_D_S2, betas=(0.5, 0.999))
     
     # Loss
     adversarial_loss = nn.BCEWithLogitsLoss()
