@@ -23,7 +23,7 @@ MAX_TEXT_LENGTH = 128 # Lunghezza massima per la tokenizzazione (stesso valore d
 # --- Parametri del Modello ---
 # Encoder
 ENCODER_MODEL_NAME = "prajjwal1/bert-mini" 
-FINE_TUNE_ENCODER = False # L'encoder non viene addestrato in questo setup
+FINE_TUNE_ENCODER = True # L'encoder non viene addestrato in questo setup
 
 # Dimensioni Fondamentali
 # La dimensione dell'embedding del testo è determinata dall'encoder scelto.
